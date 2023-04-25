@@ -45,17 +45,7 @@ end
 # ---- Solve FG ---- 
 ibr_converged, ibr_solution, ibr_models =
         solve_game(IBRGameSolver(), control_system, player_cost_models, x0, T)
-
-# ---- FG with Solve KKT ----
-kkt_converged, kkt_solution, kkt_model = solve_game(
-        KKTGameSolver(),
-        control_system,
-        player_cost_models,
-        x0,
-        T;
-        solver = Ipopt.Optimizer,
-    )
-visualize_trajectory(control_system, kkt_solution.x, canvas = VegaLite.@vlplot(width = 400, height = 400))
+visualize_trajectory(control_system, ibr_solution.x, canvas = VegaLite.@vlplot(width = 400, height = 400))
 
 # ---- Visualize ----
 
