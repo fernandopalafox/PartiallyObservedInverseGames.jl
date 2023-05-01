@@ -1,4 +1,7 @@
 # Imports
+unique!(push!(LOAD_PATH, joinpath(@__DIR__, "utils")))
+unique!(push!(LOAD_PATH, joinpath(@__DIR__, "test\\utils")))
+
 import Ipopt
 import TestDynamics
 
@@ -9,9 +12,6 @@ using VegaLite: VegaLite
 using PartiallyObservedInverseGames.TrajectoryVisualization:
     TrajectoryVisualization, visualize_trajectory
 using CollisionAvoidanceGame: CollisionAvoidanceGame
-
-unique!(push!(LOAD_PATH, joinpath(@__DIR__, "utils")))
-include("./utils/misc.jl")
 
 # ---- Setup ---- 
 
