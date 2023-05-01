@@ -1,6 +1,7 @@
 # Imports
-unique!(push!(LOAD_PATH, joinpath(@__DIR__, "utils")))
-unique!(push!(LOAD_PATH, joinpath(@__DIR__, "test\\utils")))
+const project_root_dir = realpath(joinpath(@__DIR__, ".."))
+unique!(push!(LOAD_PATH, realpath(joinpath(project_root_dir, "test/utils"))))
+unique!(push!(LOAD_PATH, realpath(joinpath(project_root_dir, "experiments/utils"))))
 
 import Ipopt
 import TestDynamics
@@ -13,14 +14,19 @@ using PartiallyObservedInverseGames.TrajectoryVisualization:
     TrajectoryVisualization, visualize_trajectory
 using CollisionAvoidanceGame: CollisionAvoidanceGame
 
+include("utils/misc.jl")
+
 # ---- Setup ---- 
 
 T = 25
 
-# TODO: Find where constraints are extracted from. Is it here? 
+# Constraints
+
+# Dynamics
 control_system =
     TestDynamics.ProductSystem([TestDynamics.Unicycle(0.25), TestDynamics.Unicycle(0.25)])
 
+# Initial conditions
 player_angles = let
     n_players = length(control_system.subsystems)
     map(eachindex(control_system.subsystems)) do ii
@@ -32,12 +38,7 @@ x0 = mapreduce(vcat, player_angles) do player_angle
     [unitvector(player_angle + pi); 0.1; player_angle + deg2rad(10)]
 end
 
-# TODO: player cost models using rotating hyperplane 
-# ... actually, cost should maybe just stay as obstacle avoidance. 
-# 
-# We need: 
-#   - add_objective
-#   - add_objective_gradients  
+# Costs
 player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
     cost_model_p1 = CollisionAvoidanceGame.generate_player_cost_model(;
         player_idx = ii,
