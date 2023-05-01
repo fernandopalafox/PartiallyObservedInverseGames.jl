@@ -4,6 +4,7 @@ using ..DynamicsModelInterface: DynamicsModelInterface
 using ..JuMPUtils: JuMPUtils
 using Ipopt: Ipopt
 using JuMP: JuMP
+using LinearAlgebra: norm
 
 using JuMP: @variable, @constraint, @objective
 using UnPack: @unpack
@@ -79,11 +80,60 @@ function solve_optimal_control(
         JuMP.fix.(u[i, :], init.u[i, :])
     end
 
+    # Add hyperplane constraints
+    # TODO: 
+    #   - Make a more general function of the form p_for_pn(t, n) where n is the player number 
+    #   - make this work for more players (do we need this tho?)
+    #   - Put this somewhere else? Not sure this is the best place to do it. 
+    #   - Prettier way of calculating norm when calculating n0
+    #   - Make sure indexing is right. Should we use p(t) or p(t+1)? 
+
+    # Parameters
+    index_offset = 4 # Depends on state space
+    rho = 1.0 # KoZ radius
+    ω = 0.08 # Angular velocity of hyperplane
+
+    # Calculate n0 (vector point from player 1 to player 2), and find its angle wrt to x-axis
+    n0_full = x0[1:2] - x0[(1 + index_offset):(2 + index_offset)]
+    α = atan(n0_full[2],n0_full[1])
+
+    # Define useful vectors
+    function n_for_p1(t)
+        [cos(α + ω * t), sin(α + ω * t)]
+    end
+    function n_for_p2(t)
+        -[cos(α + ω * t), sin(α + ω * t)]
+    end
+
+    # Only valid from 1:T
+    function p_for_p1(t)
+        x_other = x[(1 + index_offset):(2 + index_offset), t]
+        x_other + rho .* n_for_p1(t)
+    end
+    function p_for_p2(t)
+        x_other = x[1:2, t]
+        x_other + rho .* n_for_p2(t)
+    end
+
+    # Define constraints
+    @constraint(opt_model, [t = 1:T], n_for_p1(t)' * (x[1:2, t] - p_for_p1(t)) >= 0) # player 1
+    # Main.@infiltrate
+    # @constraint(
+    #     opt_model,
+    #     [t = 1:T],
+    #     n_for_p2(t)' * (x[(1 + index_offset):(2 + index_offset), t] - p_for_p2(t)) >= 0
+    # ) # player 2
+
+    # Dynamics constraints
     DynamicsModelInterface.add_dynamics_constraints!(control_system, opt_model, x, u)
     if !isnothing(x0)
         @constraint(opt_model, x[:, 1] .== x0)
     end
+
+    # Cost function
     cost_model.add_objective!(opt_model, x, u; cost_model.weights)
+
+    # Solve
     time = @elapsed JuMP.optimize!(opt_model)
     verbose && @info time
     solution = merge(JuMPUtils.get_values(; x, u), (; runtime = JuMP.solve_time(opt_model)))
