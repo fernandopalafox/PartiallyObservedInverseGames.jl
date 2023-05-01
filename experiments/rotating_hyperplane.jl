@@ -2,7 +2,7 @@
 import Ipopt
 import TestDynamics
 
-using PartiallyObservedInverseGames.ForwardGame: IBRGameSolver, solve_game, KKTGameSolver
+using PartiallyObservedInverseGames.ForwardGame: IBRGameSolver, solve_game
 using JuMP: @objective
 
 using VegaLite: VegaLite
@@ -17,6 +17,7 @@ include("./utils/misc.jl")
 
 T = 25
 
+# TODO: Find where constraints are extracted from. Is it here? 
 control_system =
     TestDynamics.ProductSystem([TestDynamics.Unicycle(0.25), TestDynamics.Unicycle(0.25)])
 
@@ -27,11 +28,16 @@ player_angles = let
         (ii - 1) * angle_fraction
     end
 end
-
 x0 = mapreduce(vcat, player_angles) do player_angle
     [unitvector(player_angle + pi); 0.1; player_angle + deg2rad(10)]
 end
 
+# TODO: player cost models using rotating hyperplane 
+# ... actually, cost should maybe just stay as obstacle avoidance. 
+# 
+# We need: 
+#   - add_objective
+#   - add_objective_gradients  
 player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
     cost_model_p1 = CollisionAvoidanceGame.generate_player_cost_model(;
         player_idx = ii,
