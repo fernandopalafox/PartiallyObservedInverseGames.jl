@@ -14,6 +14,8 @@ using PartiallyObservedInverseGames.TrajectoryVisualization:
     TrajectoryVisualization, visualize_trajectory
 using CollisionAvoidanceGame: CollisionAvoidanceGame
 
+using CSV, DataFrames
+
 include("utils/misc.jl")
 
 # ---- Setup ---- 
@@ -90,3 +92,8 @@ ground_truth_viz =
         x = "px:q",
         y = "py:q",
     )
+
+
+# ---- Save trajectory to file ----
+CSV.write("data/hyperplane_trajectory.csv", DataFrame(ibr_solution.x, :auto), header = false)
+
