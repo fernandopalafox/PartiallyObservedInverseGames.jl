@@ -6,21 +6,20 @@ unique!(push!(LOAD_PATH, realpath(joinpath(project_root_dir, "experiments/utils"
 import Ipopt
 import TestDynamics
 
+using Revise
 using PartiallyObservedInverseGames.ForwardGame: IBRGameSolver, solve_game
 using JuMP: @objective
-
 using VegaLite: VegaLite
 using PartiallyObservedInverseGames.TrajectoryVisualization:
-    TrajectoryVisualization, visualize_trajectory
+    TrajectoryVisualization, visualize_trajectory, visualize_rotating_hyperplane
 using CollisionAvoidanceGame: CollisionAvoidanceGame
-
 using CSV, DataFrames
 
 include("utils/misc.jl")
 
 # ---- Setup ---- 
 
-T = 25
+T = 50
 
 # Constraints
 
@@ -59,7 +58,7 @@ visualize_trajectory(control_system, ibr_solution.x, canvas = VegaLite.@vlplot(w
 # ---- Save trajectory to file ----
 CSV.write("data/hyperplane_trajectory.csv", DataFrame(ibr_solution.x, :auto), header = false)
 
-# ---- Visualize ----
+# ---- Plot Trajectory ----
 
 trajectory_data_gt =
     TrajectoryVisualization.trajectory_data(control_system, ibr_solution.x)
@@ -96,3 +95,5 @@ ground_truth_viz =
         y = "py:q",
     )
 
+# ---- Animation with rotating hyperplane ----
+visualize_rotating_hyperplane(ibr_solution.x) 

@@ -89,8 +89,8 @@ function solve_optimal_control(
     #   - Make sure indexing is right. Should we use p(t) or p(t+1)? 
 
     # Parameters
-    index_offset = 4 # Depends on state space
-    rho = 1.0 # KoZ radius
+    index_offset = 4 # Depends on state space, can get tide of this if I put it in cost definition tho
+    rho = 0.25 # KoZ radius
     ω = 0.08 # Angular velocity of hyperplane
 
     # Calculate n0 (vector point from player 1 to player 2), and find its angle wrt to x-axis
@@ -98,7 +98,7 @@ function solve_optimal_control(
     α = atan(n0_full[2],n0_full[1])
 
     # Define useful vectors
-    function n_for_p1(t)
+    function n_for_p1(t) 
         [cos(α + ω * t), sin(α + ω * t)]
     end
     function n_for_p2(t)
