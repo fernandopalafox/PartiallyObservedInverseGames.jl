@@ -42,7 +42,7 @@ end
 
 # Costs
 player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
-    cost_model_p1 = CollisionAvoidanceGame.generate_player_cost_model(;
+    cost_model_p1 = CollisionAvoidanceGame.generate_player_cost_model_simple(;
         player_idx = ii,
         control_system,
         T,
@@ -55,6 +55,9 @@ end
 ibr_converged, ibr_solution, ibr_models =
         solve_game(IBRGameSolver(), control_system, player_cost_models, x0, T)
 visualize_trajectory(control_system, ibr_solution.x, canvas = VegaLite.@vlplot(width = 400, height = 400))
+
+# ---- Save trajectory to file ----
+CSV.write("data/hyperplane_trajectory.csv", DataFrame(ibr_solution.x, :auto), header = false)
 
 # ---- Visualize ----
 
@@ -92,8 +95,4 @@ ground_truth_viz =
         x = "px:q",
         y = "py:q",
     )
-
-
-# ---- Save trajectory to file ----
-CSV.write("data/hyperplane_trajectory.csv", DataFrame(ibr_solution.x, :auto), header = false)
 

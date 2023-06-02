@@ -192,4 +192,56 @@ function generate_player_cost_model(;
     (; player_inputs = input_indices, weights, add_objective!, add_objective_gradients!)
 end
 
+function generate_player_cost_model_simple(;
+    player_idx,
+    control_system::TestDynamics.ProductSystem,
+    T,
+    goal_position,
+    weights = (; control_Δv = 1, control_Δθ = 1),
+    cost_prescaling = (;
+        control_Δv = 10,
+        control_Δθ = 1,
+    ),
+    fix_costs = (; # encoding soft-constraints rather than preferences
+        state_goal = 100,
+    ),
+    T_activate_goalcost = T,
+)
+    state_indices = TestDynamics.state_indices(control_system, player_idx)
+    input_indices = TestDynamics.input_indices(control_system, player_idx)
+
+    opponent_position_indices = let
+        opponent_indices = filter(!=(player_idx), eachindex(control_system.subsystems))
+        map(opponent_indices) do jj
+            TestDynamics.state_indices(control_system, jj)[1:2]
+        end
+    end
+
+    function add_objective!(opt_model, x, u; weights)
+        T = size(x, 2)
+        @views x_sub_ego = x[state_indices, :]
+        @views u_sub_ego = u[input_indices, :]
+        @views opponent_positions = map(opponent_position_indices) do opp_position_idxs
+            x[opp_position_idxs, :]
+        end
+
+        J̃ = (;
+            state_goal = isnothing(goal_position) ? 0 :
+                         sum(el -> el^2, x_sub_ego[1:2, T_activate_goalcost:T] .- goal_position),
+            control_Δv = sum(el -> el^2, u_sub_ego[1, :]),
+            control_Δθ = sum(el -> el^2, u_sub_ego[2, :]),
+        )
+        @objective(
+            opt_model,
+            Min,
+            sum(weights[k] * cost_prescaling[k] * J̃[k] for k in keys(weights)) +
+            sum(fix_costs[k] * J̃[k] for k in keys(fix_costs)) * sum(weights) / length(weights)
+        )
+    end 
+
+    
+
+    (; player_inputs = input_indices, weights, add_objective!)
+end
+
 end
