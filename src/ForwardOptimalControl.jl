@@ -93,7 +93,7 @@ function solve_optimal_control(
     rho = 0.25 # KoZ radius
     ω = 0.08 # Angular velocity of hyperplane
 
-    # Calculate n0 (vector point from player 1 to player 2), and find its angle wrt to x-axis
+    # Calculate n0 (vector point from player 2 to player 1), and find its angle wrt to x-axis
     n0_full = x0[1:2] - x0[(1 + index_offset):(2 + index_offset)]
     α = atan(n0_full[2],n0_full[1])
 
