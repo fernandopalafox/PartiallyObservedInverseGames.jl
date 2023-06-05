@@ -56,7 +56,8 @@ ibr_converged, ibr_solution, ibr_models =
 visualize_trajectory(control_system, ibr_solution.x, canvas = VegaLite.@vlplot(width = 400, height = 400))
 
 # ---- Save trajectory to file ----
-CSV.write("data/hyperplane_trajectory.csv", DataFrame(ibr_solution.x, :auto), header = false)
+CSV.write("data/trajectory_state.csv", DataFrame(ibr_solution.x, :auto), header = false)
+CSV.write("data/trajectory_control.csv", DataFrame(ibr_solution.u, :auto), header = false)
 
 # ---- Plot Trajectory ----
 
