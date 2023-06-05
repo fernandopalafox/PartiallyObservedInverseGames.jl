@@ -246,29 +246,35 @@ function generate_player_cost_model_simple(;
                 zeros(2, T_activate_goalcost - 1),
                 2 * (x_sub_ego[1:2, T_activate_goalcost:T] .- goal_position),
             )
+
+        dJdx = 
+        [
+            zeros(first(state_indices) - 1, T)
+            dgoal_dxy
+            zeros(n_states - last(state_indices), T)
+        ]
     
         # TODO: Technically this is missing the negative gradient on the opponents state but we
         # can't control that anyway (certainly not in OL Nash). Must be fixed for non-decoupled
         # systems and potentially FB Nash.
-        dJdx = let
-            dJ̃dx_sub = (;
-                state_goal = [dgoal_dxy; zeros(2, T)],
-                control_Δv = zeros(size(x_sub_ego)),
-                control_Δθ = zeros(size(x_sub_ego)),
-            )
-            dJdx_sub =
-                sum(weights[k] * dJ̃dx_sub[symbol(k)] for k in keys(weights))
-            [
-                zeros(first(state_indices) - 1, T)
-                dJdx_sub
-                zeros(n_states - last(state_indices), T)
-            ]
-        end
+        # dJdx = let
+        #     dJ̃dx_sub = (;
+        #         state_goal = [dgoal_dxy; zeros(2, T)],
+        #         control_Δv = zeros(size(x_sub_ego)),
+        #         control_Δθ = zeros(size(x_sub_ego)),
+        #     )
+        #     dJdx_sub =
+        #         sum(weights[k] * dJ̃dx_sub[symbol(k)] for k in keys(weights))
+        #     [
+        #         zeros(first(state_indices) - 1, T)
+        #         dJdx_sub
+        #         zeros(n_states - last(state_indices), T)
+        #     ]
+        # end
     
         dJdu = let
             dJdu_sub =
                 2 * [weights[:control_Δv], weights[:control_Δθ]] .* u_sub_ego
-            # I think this adds the zeros for values of Jddu that do not depend on u_sub_ego
             [
                 zeros(first(input_indices) - 1, T)
                 dJdu_sub
