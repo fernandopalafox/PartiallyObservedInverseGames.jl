@@ -197,14 +197,7 @@ function generate_player_cost_model_simple(;
     control_system::TestDynamics.ProductSystem,
     T,
     goal_position,
-    weights = (; control_Δv = 1, control_Δθ = 1),
-    cost_prescaling = (;
-        control_Δv = 10,
-        control_Δθ = 1,
-    ),
-    fix_costs = (; # encoding soft-constraints rather than preferences
-        state_goal = 100,
-    ),
+    weights = (; control_Δv = 1, control_Δθ = 1, state_goal = 1),
     T_activate_goalcost = T,
 )
     state_indices = TestDynamics.state_indices(control_system, player_idx)
@@ -234,8 +227,7 @@ function generate_player_cost_model_simple(;
         @objective(
             opt_model,
             Min,
-            sum(weights[k] * cost_prescaling[k] * J̃[k] for k in keys(weights)) +
-            sum(fix_costs[k] * J̃[k] for k in keys(fix_costs)) * sum(weights) / length(weights)
+            sum(weights[k] * J̃[k] for k in keys(weights))
         )
     end 
 
@@ -265,12 +257,7 @@ function generate_player_cost_model_simple(;
                 control_Δθ = zeros(size(x_sub_ego)),
             )
             dJdx_sub =
-                sum(
-                    weights[k] * cost_prescaling[symbol(k)] * dJ̃dx_sub[symbol(k)]
-                    for k in keys(weights)
-                ) +
-                sum(fix_costs[k] * dJ̃dx_sub[k] for k in keys(fix_costs)) * sum(weights) /
-                length(weights)
+                sum(weights[k] * dJ̃dx_sub[symbol(k)] for k in keys(weights))
             [
                 zeros(first(state_indices) - 1, T)
                 dJdx_sub
@@ -280,8 +267,8 @@ function generate_player_cost_model_simple(;
     
         dJdu = let
             dJdu_sub =
-                2 * [weights[:control_Δv], weights[:control_Δθ]] .*
-                [cost_prescaling[:control_Δv], cost_prescaling[:control_Δθ]] .* u_sub_ego
+                2 * [weights[:control_Δv], weights[:control_Δθ]] .* u_sub_ego
+            # I think this adds the zeros for values of Jddu that do not depend on u_sub_ego
             [
                 zeros(first(input_indices) - 1, T)
                 dJdu_sub
