@@ -91,7 +91,7 @@ compute it's control input.
 function visualize_rotating_hyperplane(states) 
     @warn "REMEMBER TO KEEP ROTATION/RADIUS PARAMETERS CONSISTENT!"
     rho = 0.25 # KoZ radius
-    ω = 0.08 # Angular velocity of hyperplane
+    ω = 0.05 # Angular velocity of hyperplane
 
     # Breakout states
     states_1 = states[1:4,:]

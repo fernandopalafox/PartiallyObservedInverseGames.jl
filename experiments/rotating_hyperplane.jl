@@ -19,7 +19,7 @@ include("utils/misc.jl")
 
 # ---- Setup ---- 
 
-T = 50
+T = 75
 
 # Constraints
 

@@ -91,7 +91,7 @@ function solve_optimal_control(
     # Parameters
     index_offset = 4 # Depends on state space, can get tide of this if I put it in cost definition tho
     rho = 0.25 # KoZ radius
-    ω = 0.08 # Angular velocity of hyperplane
+    ω = 0.05 # Angular velocity of hyperplane
 
     # Calculate n0 (vector point from player 2 to player 1), and find its angle wrt to x-axis
     n0_full = x0[1:2] - x0[(1 + index_offset):(2 + index_offset)]
