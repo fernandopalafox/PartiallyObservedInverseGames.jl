@@ -3,10 +3,11 @@ const project_root_dir = realpath(joinpath(@__DIR__, ".."))
 unique!(push!(LOAD_PATH, realpath(joinpath(project_root_dir, "test/utils"))))
 unique!(push!(LOAD_PATH, realpath(joinpath(project_root_dir, "experiments/utils"))))
 
+using Revise
+
 import Ipopt
 import TestDynamics
 
-using Revise
 using PartiallyObservedInverseGames.ForwardGame: IBRGameSolver, solve_game
 using JuMP: @objective
 using VegaLite: VegaLite
