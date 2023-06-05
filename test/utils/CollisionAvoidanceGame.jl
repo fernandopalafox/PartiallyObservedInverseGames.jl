@@ -239,9 +239,60 @@ function generate_player_cost_model_simple(;
         )
     end 
 
+    function add_objective_gradients!(opt_model, x, u; weights) 
+        n_states, T = size(x)
+        n_controls = size(u, 1)
+        @views x_sub_ego = x[state_indices, :]
+        @views u_sub_ego = u[input_indices, :]
+        @views opponent_positions = map(opponent_position_indices) do opp_position_idxs
+            x[opp_position_idxs, :]
+        end
     
+        dgoal_dxy =
+            isnothing(goal_position) ? zeros(2, T) :
+            hcat(
+                zeros(2, T_activate_goalcost - 1),
+                2 * (x_sub_ego[1:2, T_activate_goalcost:T] .- goal_position),
+            )
+    
+        # TODO: Technically this is missing the negative gradient on the opponents state but we
+        # can't control that anyway (certainly not in OL Nash). Must be fixed for non-decoupled
+        # systems and potentially FB Nash.
+        dJdx = let
+            dJ̃dx_sub = (;
+                state_goal = [dgoal_dxy; zeros(2, T)],
+                control_Δv = zeros(size(x_sub_ego)),
+                control_Δθ = zeros(size(x_sub_ego)),
+            )
+            dJdx_sub =
+                sum(
+                    weights[k] * cost_prescaling[symbol(k)] * dJ̃dx_sub[symbol(k)]
+                    for k in keys(weights)
+                ) +
+                sum(fix_costs[k] * dJ̃dx_sub[k] for k in keys(fix_costs)) * sum(weights) /
+                length(weights)
+            [
+                zeros(first(state_indices) - 1, T)
+                dJdx_sub
+                zeros(n_states - last(state_indices), T)
+            ]
+        end
+    
+        dJdu = let
+            dJdu_sub =
+                2 * [weights[:control_Δv], weights[:control_Δθ]] .*
+                [cost_prescaling[:control_Δv], cost_prescaling[:control_Δθ]] .* u_sub_ego
+            [
+                zeros(first(input_indices) - 1, T)
+                dJdu_sub
+                zeros(n_controls - last(input_indices), T)
+            ]
+        end
+    
+        (; dx = dJdx, du = dJdu)
+    end 
 
-    (; player_inputs = input_indices, weights, add_objective!)
+    (; player_inputs = input_indices, weights, add_objective!, add_objective_gradients!)
 end
 
 end
