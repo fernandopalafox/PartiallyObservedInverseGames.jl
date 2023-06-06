@@ -100,7 +100,7 @@ function solve_optimal_control(
     # Define useful vectors
     # Note indexing using (t-1) 
     function n_for_p1(t) 
-        [cos(α + ω * t), sin(α + ω * (t-1))]
+        [cos(α + ω * (t-1)), sin(α + ω * (t-1))]
     end
     function n_for_p2(t)
         -[cos(α + ω * t), sin(α + ω * (t-1))]
