@@ -98,11 +98,12 @@ function solve_optimal_control(
     α = atan(n0_full[2],n0_full[1])
 
     # Define useful vectors
+    # Note indexing using (t-1) 
     function n_for_p1(t) 
-        [cos(α + ω * t), sin(α + ω * t)]
+        [cos(α + ω * t), sin(α + ω * (t-1))]
     end
     function n_for_p2(t)
-        -[cos(α + ω * t), sin(α + ω * t)]
+        -[cos(α + ω * t), sin(α + ω * (t-1))]
     end
 
     # Only valid from 1:T
