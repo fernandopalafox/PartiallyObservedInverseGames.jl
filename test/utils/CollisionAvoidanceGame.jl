@@ -250,7 +250,7 @@ function generate_player_cost_model_simple(;
         dJdx = 
         [
             zeros(first(state_indices) - 1, T)
-            dgoal_dxy
+            [dgoal_dxy; zeros(2, T)]
             zeros(n_states - last(state_indices), T)
         ]
     
