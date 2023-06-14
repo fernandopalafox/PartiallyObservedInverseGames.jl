@@ -117,7 +117,7 @@ function solve_optimal_control(
     end
 
     # Define constraints
-    @constraint(opt_model, [t = 1:T], n_for_p1(t)' * (x[1:2, t] - p_for_p1(t)) >= 0) # player 1
+    # @constraint(opt_model, [t = 1:T], n_for_p1(t)' * (x[1:2, t] - p_for_p1(t)) >= 0) # player 1
     # Main.@infiltrate
     # @constraint(
     #     opt_model,

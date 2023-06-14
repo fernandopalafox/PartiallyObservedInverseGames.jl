@@ -28,6 +28,9 @@ T = 75
 control_system =
     TestDynamics.ProductSystem([TestDynamics.Unicycle(0.25), TestDynamics.Unicycle(0.25)])
 
+# control_system =
+#     TestDynamics.ProductSystem([TestDynamics.Unicycle(0.25), TestDynamics.Unicycle(0.25), TestDynamics.Unicycle(0.25)])
+
 # Initial conditions
 player_angles = let
     n_players = length(control_system.subsystems)
@@ -39,6 +42,9 @@ end
 x0 = mapreduce(vcat, player_angles) do player_angle
     [unitvector(player_angle + pi); 0.1; player_angle + deg2rad(10)]
 end
+x0[4] = 0.0
+x0[8] = pi/2
+# x0[12] = pi
 
 # Costs
 player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)

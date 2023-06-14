@@ -8,6 +8,7 @@ import JuMP
 using JuMP: @variable, @constraint, @NLconstraint
 
 include("unicycle.jl")
+include("hyperunicycle.jl")
 include("product_system.jl")
 
 end
