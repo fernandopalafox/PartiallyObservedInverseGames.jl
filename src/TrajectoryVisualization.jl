@@ -88,10 +88,10 @@ end
 Animation of a two-player collision avoidance game where player 1 is using a rotating hyperplane to 
 compute it's control input. 
 """
-function visualize_rotating_hyperplane(states) 
+function visualize_rotating_hyperplane(states, params) 
     @warn "REMEMBER TO KEEP ROTATION/RADIUS PARAMETERS CONSISTENT!"
-    rho = 0.25 # KoZ radius
-    ω = 0.05 # Angular velocity of hyperplane
+    rho = params.ρ # KoZ radius
+    ω = params.ω # Angular velocity of hyperplane
 
     # Breakout states
     states_1 = states[1:4,:]
@@ -120,7 +120,7 @@ function visualize_rotating_hyperplane(states)
         plot(
             [states_1[1,1:i], states_2[1,1:i]], [states_1[2,1:i], states_2[2,1:i]], 
             legend = true, 
-            title = "t = $i", 
+            title = params.title * "\nt = $i\nω = " * string(round(params.ω, digits = 5)),
             xlabel = "x", ylabel = "y", 
             size = (500,500),
             xlims = domain,
@@ -166,7 +166,7 @@ function visualize_rotating_hyperplane(states)
         )
 
     end
-    gif(anim, fps = 5, "rotating_hyperplane.gif")
+    gif(anim, fps = 5, "rotating_hyperplane_"*params.title*".gif")
 end    
 
 end
