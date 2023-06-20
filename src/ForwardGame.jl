@@ -6,10 +6,10 @@ import ..DynamicsModelInterface
 import ..JuMPUtils
 import ..ForwardOptimalControl
 
-using JuMP: @variable, @constraint, @objective
+using JuMP: @variable, @constraint, @objective, @NLconstraint
 using UnPack: @unpack
 
-export IBRGameSolver, KKTGameSolver, solve_game
+export IBRGameSolver, KKTGameSolver, solve_game, KKTGameSolverBarrier
 
 #================================ Iterated Best Open-Loop Response =================================#
 
@@ -138,6 +138,127 @@ function solve_game(
     verbose && @info time
 
     JuMPUtils.isconverged(opt_model), JuMPUtils.get_values(; x, u, λ), opt_model
+end
+
+end
+
+struct KKTGameSolverBarrier end
+
+function solve_game(
+    ::KKTGameSolverBarrier,
+    control_system,
+    player_cost_models,
+    x0,
+    T;
+    solver = Ipopt.Optimizer,
+    solver_attributes = (; print_level = 5),
+    init = (),
+    match_equilibrium = nothing,
+    verbose = false,
+)
+
+    # TEMPORARY PARAMETERS
+    μ = 0.00001
+
+    n_players = length(player_cost_models)
+    @unpack n_states, n_controls = control_system
+
+    opt_model = JuMP.Model(solver)
+    JuMPUtils.set_solver_attributes!(opt_model; solver_attributes...)
+
+    # Decision Variables
+    x = @variable(opt_model, [1:n_states, 1:T])
+    u = @variable(opt_model, [1:n_controls, 1:T])
+    λ_e = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
+    λ_i = @variable(opt_model, [1:T])
+    s   = @variable(opt_model, [1:T], start = 0.001, lower_bound = 0.0)
+
+    # Initialization
+    JuMPUtils.init_if_hasproperty!(λ_e, init, :λ_e)
+    JuMPUtils.init_if_hasproperty!(λ_i, init, :λ_i)
+    JuMPUtils.init_if_hasproperty!(x, init, :x)
+    JuMPUtils.init_if_hasproperty!(u, init, :u)
+
+    # constraints
+    @constraint(opt_model, x[:, 1] .== x0)
+    DynamicsModelInterface.add_dynamics_constraints!(control_system, opt_model, x, u)
+    df = DynamicsModelInterface.add_dynamics_jacobians!(control_system, opt_model, x, u)
+
+    for (player_idx, cost_model) in enumerate(player_cost_models)
+        @unpack player_inputs, weights = cost_model
+        dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
+
+        # Make this more general 
+        if player_idx == 1
+            # Add hyperplane constraints for player 1 (make this more general!)
+            n0 = x0[1:2] - x0[(1 + 4):(2 + 4)]
+            α = atan(n0[2],n0[1])
+
+            # Extract inequality constraints (without setting them)
+            h = DynamicsModelInterface.add_inequality_constraints!(
+                control_system.subsystems[player_idx], opt_model, x, u, 
+                (; ω = control_system.subsystems[1].ω, α = α)
+                ; set = false
+            )
+
+            # Add Jacobians 
+            dh = DynamicsModelInterface.add_inequality_jacobians!(
+                control_system.subsystems[player_idx], opt_model, x, u, 
+                (; ω = control_system.subsystems[1].ω, α = α)
+            )
+            
+            # Gradient of the Lagrangian wrt x is zero 
+            @constraint(opt_model, 
+                [t = 2:(T-1)],
+                dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' - λ_e[:, t, player_idx]'*df.dx[:, :, t] + λ_i[t]*dh.dx[t, :]' .== 0
+            )
+            @constraint(opt_model, 
+                dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' + λ_i[T]*dh.dx[T, :]' .== 0
+            )   
+
+            # Gradient of the Lagrangian wrt player's own inputs is zero
+            @constraint(opt_model, 
+                [t = 1:(T-1)], 
+                dJ.du[player_inputs, t]' - λ_e[:,t,player_idx]'*df.du[:,player_inputs,t] .== 0)
+            @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
+
+            # Gradient of the Lagrangian wrt s is zero
+            s_inv = @variable(opt_model, [1:T])
+            @NLconstraint(opt_model, [t = 1:T], s_inv[t] == 1/s[t])
+            @constraint(opt_model, [t = 1:T], -μ*s_inv[t] - λ_i[t] == 0)
+
+            # Feasiblity of barrier-ed inequality constraints          
+            @constraint(opt_model, [t = 1:T], h(t) - s[t] == 0)
+        else
+            # KKT Nash constraints
+            @constraint(
+                opt_model,
+                [t = 2:(T - 1)],
+                dJ.dx[:, t] + λ_e[:, t - 1, player_idx] - (λ_e[:, t, player_idx]' * df.dx[:, :, t])' .== 0
+            )
+            @constraint(opt_model, dJ.dx[:, T] + λ_e[:, T - 1, player_idx] .== 0)
+
+            @constraint(
+                opt_model,
+                [t = 1:(T - 1)],
+                dJ.du[player_inputs, t] - (λ_e[:, t, player_idx]' * df.du[:, player_inputs, t])' .== 0
+            )
+            @constraint(opt_model, dJ.du[player_inputs, T] .== 0)
+        end        
+    end
+
+    # if !isnothing(match_equilibrium)
+    #     @objective(
+    #         opt_model,
+    #         Min,
+    #         sum(el -> el^2, x - match_equilibrium.x)
+    #     )
+    # end
+
+    time = @elapsed JuMP.optimize!(opt_model)
+    verbose && @info time
+
+    JuMPUtils.isconverged(opt_model), JuMPUtils.get_values(; x, u, λ_e, λ_i, s), opt_model
 end
 
 end
