@@ -140,8 +140,6 @@ function solve_game(
     JuMPUtils.isconverged(opt_model), JuMPUtils.get_values(; x, u, λ), opt_model
 end
 
-end
-
 struct KKTGameSolverBarrier end
 
 function solve_game(
