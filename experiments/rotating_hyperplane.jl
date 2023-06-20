@@ -20,7 +20,7 @@ include("utils/misc.jl")
 
 # ---- Setup ---- 
 T = 75
-ω = 0.025
+ω = 0.03
 ρ = 0.25
 
 

@@ -81,46 +81,32 @@ function solve_optimal_control(
     end
 
     # Add hyperplane constraints
-    # TODO: 
-    #   - Make a more general function of the form p_for_pn(t, n) where n is the player number 
-    #   - make this work for more players (do we need this tho?)
-    #   - Put this somewhere else? Not sure this is the best place to do it. 
-    #   - Prettier way of calculating norm when calculating n0
-    #   - Make sure indexing is right. Should we use p(t) or p(t+1)? 
 
     # Parameters
     index_offset = 4 # Depends on state space, can get tide of this if I put it in cost definition tho
     rho = 0.25 # KoZ radius
-    ω = 0.05 # Angular velocity of hyperplane
+    ω = 0.03 # Angular velocity of hyperplane
 
     # Calculate n0 (vector point from player 2 to player 1), and find its angle wrt to x-axis
     n0_full = x0[1:2] - x0[(1 + index_offset):(2 + index_offset)]
     α = atan(n0_full[2],n0_full[1])
 
     # Define useful vectors
-    # Note indexing using (t-1) 
-    function n_for_p1(t) 
+    function n(t) 
         [cos(α + ω * (t-1)), sin(α + ω * (t-1))]
     end
-    function n_for_p2(t)
-        -[cos(α + ω * t), sin(α + ω * (t-1))]
-    end
-
-    # Only valid from 1:T
-    function p_for_p1(t)
+    function p(t)
         x_other = x[(1 + index_offset):(2 + index_offset), t]
-        x_other + rho .* n_for_p1(t)
-    end
-    function p_for_p2(t)
-        x_other = x[1:2, t]
-        x_other + rho .* n_for_p2(t)
+        x_other + rho .* n(t)
     end
 
-    # Define constraints
-    @constraint(opt_model, [t = 1:T], n_for_p1(t)' * (x[1:2, t] - p_for_p1(t)) >= 0) # player 1
+    # Hyperplane constraint
+    @constraint(opt_model, [t = 1:T], n(t)' * (x[1:2, t] - p(t)) >= 0) # player 1
 
     # Dynamics constraints
     DynamicsModelInterface.add_dynamics_constraints!(control_system, opt_model, x, u)
+
+    # Initial condition constraint
     if !isnothing(x0)
         @constraint(opt_model, x[:, 1] .== x0)
     end
