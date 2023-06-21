@@ -89,7 +89,6 @@ Animation of a two-player collision avoidance game where player 1 is using a rot
 compute it's control input. 
 """
 function visualize_rotating_hyperplane(states, params) 
-    # @warn "REMEMBER TO KEEP ROTATION/RADIUS PARAMETERS CONSISTENT!
     rho = params.ρ # KoZ radius
     ω = params.ω # Angular velocity of hyperplane
 
