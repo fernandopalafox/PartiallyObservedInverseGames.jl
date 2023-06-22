@@ -20,8 +20,8 @@ include("utils/misc.jl")
 
 # ---- Setup ---- 
 T = 75
-ωs = [0.03, 0.03]
-ρs = [0.25, 0.25]
+ωs = [0.03, 0.03, -0.03]
+ρs = [0.1, 0.1, 0.1]
 
 
 # Dynamics
@@ -29,12 +29,13 @@ control_system =
     TestDynamics.ProductSystem([TestDynamics.HyperUnicycle(0.25, 0.0, ρ), 
     TestDynamics.Unicycle(0.25), TestDynamics.Unicycle(0.25)])
 
+
 # Initial position 
 player_angles = [0.0, pi/2, pi]
 x0 = [-1.0, 0.0, 0.1, player_angles[1], 
        0.0, -1.0, 0.1, player_angles[2], 
-       1.0, 0.0, 0.1, player_angles[3]]
-
+       1.0, 0.0, 0.04, player_angles[3]]
+       
 # Costs
 player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
     cost_model_p1 = CollisionAvoidanceGame.generate_player_cost_model_simple(;
@@ -63,3 +64,4 @@ ibr_converged, ibr_solution, ibr_models =
 # ---- Animation with rotating hyperplane ----
 # visualize_rotating_hyperplane(kkt_solution.x,(; ω = ω, ρ = ρ, title = "Forward"))
 visualize_rotating_hyperplanes(ibr_solution.x,(; ωs = ωs , ρs = ρs, title = "IBR"))
+# visualize_rotating_hyperplane(ibr_solution.x[1:8,:],(; ω = ωs[3], ρ = ρs[3], title = "IBR"))

@@ -83,20 +83,25 @@ function solve_optimal_control(
         JuMP.fix.(u[i, :], init.u[i, :])
     end
 
-    # Add hyperplane constraints (centered around player 1)
+    
     @warn "remove hardocoded stuff (and hyperplane from here)"
     n_players = 3
-    ωs = [0.03, 0.03]
-    ρs = [0.25, 0.25]
+    ωs = [0.03, 0.03, -0.03]
+    ρs = [0.25, 0.25,  0.1]
     n_states_per_player = control_system.subsystems[1].n_states
+
+    # Add hyperplane constraints (centered around player 1)
     for i in 1:(n_players - 1)
         index_offset = n_states_per_player * i
         # Parameters
         ρ = ρs[i] # KoZ radius
         ω = ωs[i] # Angular velocity of hyperplane
 
+        idx_ego = [1, 2]
+        idx_other = [1 + index_offset, 2 + index_offset]
+
         # Calculate hyperplane normal 
-        n0 = x0[1:2] - x0[(1 + index_offset):(2 + index_offset)]
+        n0 = x0[idx_ego] - x0[idx_other]
         α = atan(n0[2],n0[1])
 
         # Define useful vectors
@@ -104,13 +109,41 @@ function solve_optimal_control(
             [cos(α + ω * (t-1)), sin(α + ω * (t-1))]
         end
         function p(t)
-            x_other = x[(1 + index_offset):(2 + index_offset), t]
+            x_other = x[idx_other, t]
             x_other + ρ .* n(t)
         end
 
         # Add constraint
-        @constraint(opt_model, [t = 1:T], n(t)' * (x[1:2, t] - p(t)) >= 0) 
+        @constraint(opt_model, [t = 1:T], n(t)' * (x[idx_ego, t] - p(t)) >= 0) 
     end
+
+    # # Add hyperplane constraint (centered around player 2)
+    # for i in 3:3
+    #     index_offset = n_states_per_player * i
+    #     # Parameters
+    #     ρ = ρs[3] # KoZ radius
+    #     ω = ωs[3] # Angular velocity of hyperplane
+
+    #     # Ego indices
+    #     idx_ego = [1, 2]
+    #     idx_other = [5, 6]
+        
+    #     # Calculate hyperplane normal 
+    #     n0 = x0[idx_ego] - x0[idx_other]
+    #     α = atan(n0[2],n0[1])
+
+    #     # Define useful vectors
+    #     function n(t) 
+    #         [cos(α + ω * (t-1)), sin(α + ω * (t-1))]
+    #     end
+    #     function p(t)
+    #         x_other = x[idx_other, t]
+    #         x_other + ρ .* n(t)
+    #     end
+
+    #     # Add constraint
+    #     @constraint(opt_model, [t = 1:T], n(t)' * (x[idx_ego, t] - p(t)) >= 0) 
+    # end
 
     # Dynamics constraints
     DynamicsModelInterface.add_dynamics_constraints!(control_system, opt_model, x, u)
