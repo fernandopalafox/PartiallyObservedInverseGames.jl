@@ -62,6 +62,9 @@ function solve_optimal_control(
     solver_attributes = (; print_level = 3),
     verbose = false,
 )
+
+    
+
     @unpack n_states, n_controls = control_system
 
     opt_model = JuMP.Model(solver)
@@ -80,28 +83,34 @@ function solve_optimal_control(
         JuMP.fix.(u[i, :], init.u[i, :])
     end
 
-    # Add hyperplane constraints
+    # Add hyperplane constraints (centered around player 1)
+    @warn "remove hardocoded stuff (and hyperplane from here)"
+    n_players = 3
+    ωs = [0.03, 0.03]
+    ρs = [0.25, 0.25]
+    n_states_per_player = control_system.subsystems[1].n_states
+    for i in 1:(n_players - 1)
+        index_offset = n_states_per_player * i
+        # Parameters
+        ρ = ρs[i] # KoZ radius
+        ω = ωs[i] # Angular velocity of hyperplane
 
-    # Parameters
-    index_offset = 4 # Depends on state space, can get tide of this if I put it in cost definition tho
-    rho = 0.25 # KoZ radius
-    ω = 0.03 # Angular velocity of hyperplane
+        # Calculate hyperplane normal 
+        n0 = x0[1:2] - x0[(1 + index_offset):(2 + index_offset)]
+        α = atan(n0[2],n0[1])
 
-    # Calculate n0 (vector point from player 2 to player 1), and find its angle wrt to x-axis
-    n0_full = x0[1:2] - x0[(1 + index_offset):(2 + index_offset)]
-    α = atan(n0_full[2],n0_full[1])
+        # Define useful vectors
+        function n(t) 
+            [cos(α + ω * (t-1)), sin(α + ω * (t-1))]
+        end
+        function p(t)
+            x_other = x[(1 + index_offset):(2 + index_offset), t]
+            x_other + ρ .* n(t)
+        end
 
-    # Define useful vectors
-    function n(t) 
-        [cos(α + ω * (t-1)), sin(α + ω * (t-1))]
+        # Add constraint
+        @constraint(opt_model, [t = 1:T], n(t)' * (x[1:2, t] - p(t)) >= 0) 
     end
-    function p(t)
-        x_other = x[(1 + index_offset):(2 + index_offset), t]
-        x_other + rho .* n(t)
-    end
-
-    # Hyperplane constraint
-    @constraint(opt_model, [t = 1:T], n(t)' * (x[1:2, t] - p(t)) >= 0) # player 1
 
     # Dynamics constraints
     DynamicsModelInterface.add_dynamics_constraints!(control_system, opt_model, x, u)
