@@ -160,6 +160,120 @@ function DynamicsModelInterface.add_inequality_jacobians!(system::HyperUnicycle,
     (; dx = dhdx)
 end
 
+function DynamicsModelInterface.add_shared_constraint!(system::HyperUnicycle, opt_model, x, u, params; set = true)
+    # Note: this is getting fed the FULL state vector, not just the player 1 state vector
+
+    # Known parameters
+    T = size(x, 2)
+    couple = params.couple
+    ρ = params.ρs[couple]
+    α = params.αs[couple]
+    ω = params.ωs[couple]
+
+    # Player indices 
+    idx_ego   = (1:2) .+ (couple[1] - 1)*system.n_states
+    idx_other = (1:2) .+ (couple[2] - 1)*system.n_states
+
+    # Hyperplane normal 
+    # Note indexing using (t-1) 
+    n_cos = @variable(opt_model, [1:T])
+    n_sin = @variable(opt_model, [1:T])
+    @NLconstraint(opt_model, [t = 1:T], n_cos[t] == cos(α + ω * (t-1)))
+    @NLconstraint(opt_model, [t = 1:T], n_sin[t] == sin(α + ω * (t-1)))
+    function n(t)
+        [n_cos[t],n_sin[t]]
+    end
+
+    # Intersection of hyperplane w/ KoZ
+    function p(t)
+        x_other = x[idx_other, t]
+        x_other + ρ .* n(t)
+    end
+
+    # Define constraint
+    function h(t)
+        n(t)' * (x[idx_ego, t] - p(t))
+    end
+
+    # Set constraints
+    if set
+        @constraint(opt_model, [t = 1:T], h(t) >= 0) # player 1
+    end
+    
+    # Return constraint function and time indices where it applies
+    return h
+end 
+
+function DynamicsModelInterface.add_shared_jacobian!(system::HyperUnicycle, opt_model, x, u, params)
+    # Note: this is getting fed the FULL state vector, not just the player 1 state vector
+
+    # Known parameters
+    n_states_all, T = size(x)
+    n_states = system.n_states
+    n_players = Int(n_states_all/n_states)
+    couple = params.couple
+    ρ = params.ρs[couple]
+    α = params.αs[couple]
+    ω = params.ωs[couple]
+
+    # Player indices 
+    idx_ego   = (1:2) .+ (couple[1] - 1)*system.n_states
+    idx_owner = (1:2) .+ (couple[2] - 1)*system.n_states
+    idx_other = setdiff(1:n_states_all, vcat(idx_ego, idx_owner))
+
+    # Gradients of hyperplane constraints with respect to x
+    n_cos = @variable(opt_model, [2:T])
+    n_sin = @variable(opt_model, [2:T])
+    @NLconstraint(opt_model, [t = 2:T], n_cos[t] == cos(α + ω * (t-1)))
+    @NLconstraint(opt_model, [t = 2:T], n_sin[t] == sin(α + ω * (t-1)))
+
+    dhdx = @variable(opt_model, [1, 1:n_states_all, 1:T])
+    # Elements corresponding to ego 
+    @constraint(
+        opt_model,
+        [t = 2:T],
+        dhdx[1, idx_ego, t] .== 
+        [
+             n_cos[t]
+             n_sin[t]
+        ]
+    )
+    # Elements corresponding to hyperplane owner 
+    @constraint(
+        opt_model,
+        [t = 2:T],
+        dhdx[1, idx_owner, t] .== 
+        [
+            -n_cos[t]
+            -n_sin[t]
+        ]
+    )
+    # Rest of elements 
+    @constraint(
+        opt_model,
+        [t = 2:T],
+        dhdx[1, idx_other, t] .== 
+        zeros((n_states - 2)*2 + n_states*(n_players - 2))
+    )
+
+    # # Original version
+    # @constraint(
+    #     opt_model,
+    #     [t = 2:T],
+    #     dhdx[t, :] .== 
+    #     [
+    #          n_cos[t]
+    #          n_sin[t]
+    #         zeros(n_states - 2)
+    #         -n_cos[t]
+    #         -n_sin[t]
+    #         zeros(n_states - 2)
+    #     ]
+    # )
+
+    (; dx = dhdx)
+end
+
 #========================================== Visualization ==========================================#
 
 function TrajectoryVisualization.trajectory_data(::HyperUnicycle, x, player = 1)

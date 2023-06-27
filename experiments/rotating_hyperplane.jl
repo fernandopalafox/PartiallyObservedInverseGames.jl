@@ -20,8 +20,12 @@ include("utils/misc.jl")
 
 # ---- Setup ---- 
 T = 75
-ω = 0.03
-ρ = 0.25
+ωs = [0.0 0.03] 
+ρs = [0.0 0.25]
+αs = [0.0 3/4*pi] 
+adj_mat = [false true; 
+           false false]
+constraint_params = (; adj_mat, ωs, ρs, αs)
 
 
 # Dynamics
@@ -48,7 +52,8 @@ ibr_converged, ibr_solution, ibr_models =
         solve_game(IBRGameSolver(), control_system, player_cost_models, x0, T)
 kkt_converged, kkt_solution, kkt_model = 
         solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, T; solver = Ipopt.Optimizer, 
-        init = (;x = ibr_solution.x, u = ibr_solution.u))
+        init = (;x = ibr_solution.x, u = ibr_solution.u),
+        constraint_params = constraint_params)
 
 
 # ---- Save trajectory to file ----

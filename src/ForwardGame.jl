@@ -153,6 +153,7 @@ function solve_game(
     init = (),
     match_equilibrium = nothing,
     verbose = false,
+    constraint_params = (; adj_mat = nothing),
 )
 
     # TEMPORARY PARAMETERS
@@ -168,12 +169,10 @@ function solve_game(
     x = @variable(opt_model, [1:n_states, 1:T])
     u = @variable(opt_model, [1:n_controls, 1:T])
     λ_e = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
-    λ_i = @variable(opt_model, [1:T])
-    s   = @variable(opt_model, [1:T], start = 0.001, lower_bound = 0.0)
 
     # Initialization
     JuMPUtils.init_if_hasproperty!(λ_e, init, :λ_e)
-    JuMPUtils.init_if_hasproperty!(λ_i, init, :λ_i)
+    # JuMPUtils.init_if_hasproperty!(λ_i, init, :λ_i)
     JuMPUtils.init_if_hasproperty!(x, init, :x)
     JuMPUtils.init_if_hasproperty!(u, init, :u)
 
@@ -186,47 +185,62 @@ function solve_game(
         @unpack player_inputs, weights = cost_model
         dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
 
-        # Make this more general 
-        if player_idx == 1
-            # Add hyperplane constraints for player 1 (make this more general!)
-            n0 = x0[1:2] - x0[(1 + 4):(2 + 4)]
-            α = atan(n0[2],n0[1])
+        # Adjacency matrix denotes shared inequality constraint
+        if !isnothing(constraint_params.adj_mat) & 
+           !isempty(findall(constraint_params.adj_mat[player_idx,:]))
+            dhdx_container = []
+            λ_i_container  = []
+            s    = []
+            for owner_idx in findall(constraint_params.adj_mat[player_idx,:]) 
+                params = (;couple = CartesianIndex(player_idx, owner_idx), constraint_params...)
 
-            # Extract inequality constraints (without setting them)
-            h = DynamicsModelInterface.add_inequality_constraints!(
-                control_system.subsystems[player_idx], opt_model, x, u, 
-                (; ω = control_system.subsystems[1].ω, α = α)
-                ; set = false
-            )
+                # Extract shared constraint for player couple 
+                hs = DynamicsModelInterface.add_shared_constraint!(
+                                        control_system.subsystems[player_idx], opt_model, x, u, params; set = false
+                                    )
 
-            # Add Jacobians 
-            dh = DynamicsModelInterface.add_inequality_jacobians!(
-                control_system.subsystems[player_idx], opt_model, x, u, 
-                (; ω = control_system.subsystems[1].ω, α = α)
-            )
-            
+                # Extract shared constraint Jacobian 
+                dhs = DynamicsModelInterface.add_shared_jacobian!(
+                                        control_system.subsystems[player_idx], opt_model, x, u, params
+                                    )
+
+                # Stack shared constraint Jacobian. 
+                # One row per couple, timestep indexing along 3rd axis
+                append!(dhdx_container, [dhs.dx]) 
+                
+                # Add slack and dual variables corresponding to inequality constraints
+                append!(λ_i_container, [@variable(opt_model, [1:T])]')
+                s_couple = @variable(opt_model, [1:T], start = 0.001, lower_bound = 0.0)
+
+                # Feasibility of barrier-ed constraints
+                @constraint(opt_model, [t = 1:T], hs(t) - s_couple[t] == 0.0)
+
+                # Add to vector of all slacks 
+                append!(s, s_couple)                
+            end
+            # Make into a single array (easier to index into)
+            dhdx = vcat(dhdx_container...)
+            λ_i  = vcat(λ_i_container...)
+
             # Gradient of the Lagrangian wrt x is zero 
             @constraint(opt_model, 
-                [t = 2:(T-1)],
-                dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' - λ_e[:, t, player_idx]'*df.dx[:, :, t] + λ_i[t]*dh.dx[t, :]' .== 0
+            [t = 2:(T-1)],
+            dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' - λ_e[:, t, player_idx]'*df.dx[:, :, t] + λ_i[:,t]'*dhdx[:,:,t] .== 0
             )
             @constraint(opt_model, 
-                dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' + λ_i[T]*dh.dx[T, :]' .== 0
+                dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' + λ_i[:,T]'*dhdx[:, :, T] .== 0
             )   
 
             # Gradient of the Lagrangian wrt player's own inputs is zero
             @constraint(opt_model, 
-                [t = 1:(T-1)], 
-                dJ.du[player_inputs, t]' - λ_e[:,t,player_idx]'*df.du[:,player_inputs,t] .== 0)
+            [t = 1:(T-1)], 
+            dJ.du[player_inputs, t]' - λ_e[:,t,player_idx]'*df.du[:,player_inputs,t] .== 0)
             @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
 
             # Gradient of the Lagrangian wrt s is zero
             s_inv = @variable(opt_model, [1:T])
             @NLconstraint(opt_model, [t = 1:T], s_inv[t] == 1/s[t])
             @constraint(opt_model, [t = 1:T], -μ*s_inv[t] - λ_i[t] == 0)
-
-            # Feasiblity of barrier-ed inequality constraints          
-            @constraint(opt_model, [t = 1:T], h(t) - s[t] == 0)
         else
             # KKT Nash constraints
             @constraint(
@@ -241,8 +255,9 @@ function solve_game(
                 [t = 1:(T - 1)],
                 dJ.du[player_inputs, t] - (λ_e[:, t, player_idx]' * df.du[:, player_inputs, t])' .== 0
             )
-            @constraint(opt_model, dJ.du[player_inputs, T] .== 0)
-        end        
+            @constraint(opt_model, dJ.du[player_inputs, T] .== 0)            
+        end
+     
     end
 
     # if !isnothing(match_equilibrium)
@@ -256,7 +271,7 @@ function solve_game(
     time = @elapsed JuMP.optimize!(opt_model)
     verbose && @info time
 
-    JuMPUtils.isconverged(opt_model), JuMPUtils.get_values(; x, u, λ_e, λ_i, s), opt_model
+    JuMPUtils.isconverged(opt_model), JuMPUtils.get_values(; x, u), opt_model
 end
 
 end
