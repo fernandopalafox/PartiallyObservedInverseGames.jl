@@ -89,8 +89,9 @@ Animation of a two-player collision avoidance game where player 1 is using a rot
 compute it's control input. 
 """
 function visualize_rotating_hyperplane(states, params) 
-    ρ = params.ρ # KoZ radius
-    ω = params.ω # Angular velocity of hyperplane
+    ρs = params.ρs # KoZ radius
+    ωs = params.ωs # Angular velocity of hyperplane
+    αs = params.αs # Initial angle of hyperplane
 
     # Breakout states
     states_1 = states[1:4,:]
@@ -103,15 +104,12 @@ function visualize_rotating_hyperplane(states, params)
     domain  = [minimum([x_domain[1],y_domain[1]]),maximum([x_domain[2],y_domain[2]])]
 
     # Define useful vectors
-    function n_for_p1(t)
-        [cos(α + ω * t), sin(α + ω * t)]
-    end
     function n(t)
-        -[cos(α + ω * t), sin(α + ω * t)]
+        [cos(αs[1,2] + ωs[1,2] * (t-1)), sin(αs[1,2] + ωs[1,2] * (t-1))]
     end
 
-    n0_full = states_2[1:2] - states_1[1:2]
-    α = atan(n0_full[2],n0_full[1])
+    # n0_full = states_2[1:2] - states_1[1:2]
+    # α = atan(n0_full[2],n0_full[1])
 
     # Animation of trajectory 
     anim = @animate for i = 1:T
@@ -119,7 +117,7 @@ function visualize_rotating_hyperplane(states, params)
         plot(
             [states_1[1,1:i], states_2[1,1:i]], [states_1[2,1:i], states_2[2,1:i]], 
             legend = true, 
-            title = params.title * "\nt = $i\nω = " * string(round(params.ω, digits = 5)),
+            title = params.title * "\nt = $i\nω = " * string(round(params.ωs[1,2], digits = 5)),
             xlabel = "x", ylabel = "y", 
             size = (500,500),
             xlims = domain,
@@ -142,26 +140,26 @@ function visualize_rotating_hyperplane(states, params)
 
         # Plot KoZ around player 2
         plot!(
-            [states_2[1,i] + ρ * cos(θ) for θ in range(0,stop=2π,length=100)], 
-            [states_2[2,i] + ρ * sin(θ) for θ in range(0,stop=2π,length=100)], 
-            color = :black, 
+            [states_2[1,i] + ρs[1,2] * cos(θ) for θ in range(0,stop=2π,length=100)], 
+            [states_2[2,i] + ρs[1,2] * sin(θ) for θ in range(0,stop=2π,length=100)], 
+            color = :blue, 
             legend = false,
             fillalpha = 0.1,
             fill = true,
         )
         # Plot line from player 2 to hyperplane 
-        ni = ρ*n(i-1)
+        ni = ρs[1,2]*n(i)
         plot!([states_2[1,i],states_2[1,i] + ni[1]],
               [states_2[2,i],states_2[2,i] + ni[2]],
               arrow = true,
-              color = :black)   
+              color = :blue)   
               
         # Plot hyperplane
         hyperplane_domain = 10*range(domain[1],domain[2],100)
         p_for_p2 = states_2[1:2,i] + ni
         plot!(hyperplane_domain .+ p_for_p2[1],
             [-ni[1]/ni[2]*x + p_for_p2[2] for x in hyperplane_domain],
-            color = :black,
+            color = :blue,
         )
 
     end
@@ -173,6 +171,7 @@ function visualize_rotating_hyperplanes(states, params)
     # Parameters
     ρs = params.ρs # KoZ radius
     ωs = params.ωs # Angular velocity of hyperplane
+    αs = params.αs
 
     # Breakout states
     states_1 = states[1:4,:]
@@ -185,17 +184,15 @@ function visualize_rotating_hyperplanes(states, params)
     y_domain = extrema(states[[2,6,10],:]) .+ (-0.01, 0.01)
     domain  = [minimum([x_domain[1],y_domain[1]]),maximum([x_domain[2],y_domain[2]])]
 
-    Main.@infiltrate
-
     # Define useful vectors
     function n(t, α, ω)
-        -[cos(α + ω * t), sin(α + ω * t)]
+        [cos(α + ω * (t-1)), sin(α + ω * (t-1))]
     end
 
     n0_1_2 = states_2[1:2] - states_1[1:2]
     n0_1_3 = states_3[1:2] - states_1[1:2]
     n0_2_3 = states_3[1:2] - states_2[1:2]
-    αs = [atan(n0_1_2[2],n0_1_2[1]), atan(n0_1_3[2],n0_1_3[1]), atan(n0_2_3[2],n0_2_3[1])]
+    # αs = [atan(n0_1_2[2],n0_1_2[1]), atan(n0_1_3[2],n0_1_3[1]), atan(n0_2_3[2],n0_2_3[1])]
 
     # Animation of trajectory 
     anim = @animate for i = 1:T
@@ -215,7 +212,7 @@ function visualize_rotating_hyperplanes(states, params)
             states_1[1,1:i], 
             states_1[2,1:i], 
             legend = true, 
-            title = params.title * "\nt = $i\nω = " * string(params.ωs),
+            title = params.title * "\nt = $i\nω = " * string(params.ωs) * "\nρ = " * string(params.ρs),
             xlabel = "x", ylabel = "y", 
             size = (500,500),
             xlims = domain,
@@ -237,62 +234,71 @@ function visualize_rotating_hyperplanes(states, params)
         )
         scatter!(
             [states_3[1,i]], [states_3[2,i]], 
-            color = :red,
+            color = :green,
             markersize = 5,
             label = "P3",
         )
 
-        # Plot KoZ around player 2
+        # Plot KoZ around player 2 for hyperplane (1,2)
         plot!(
-            [states_2[1,i] + ρs[1] * cos(θ) for θ in range(0,stop=2π,length=100)], 
-            [states_2[2,i] + ρs[1] * sin(θ) for θ in range(0,stop=2π,length=100)], 
-            color = :black, 
+            [states_2[1,i] + ρs[1,2] * cos(θ) for θ in range(0,stop=2π,length=100)], 
+            [states_2[2,i] + ρs[1,2] * sin(θ) for θ in range(0,stop=2π,length=100)], 
+            color = :blue, 
             legend = false,
             fillalpha = 0.1,
             fill = true,
         )
-        # Plot KoZ around player 3
+        # Plot KoZ around player 3 for hyperplane (1,3)
         plot!(
-            [states_3[1,i] + ρs[2] * cos(θ) for θ in range(0,stop=2π,length=100)], 
-            [states_3[2,i] + ρs[2] * sin(θ) for θ in range(0,stop=2π,length=100)], 
-            color = :black, 
+            [states_3[1,i] + ρs[1,3] * cos(θ) for θ in range(0,stop=2π,length=100)], 
+            [states_3[2,i] + ρs[1,3] * sin(θ) for θ in range(0,stop=2π,length=100)], 
+            color = :blue, 
             legend = false,
             fillalpha = 0.1,
             fill = true,
         )
-        # Plot line from player 2 to hyperplane 
-        ni = ρs[1]*n(i, αs[1], ωs[1])
+        # Plot KoZ around player 3 for hyperplane (2,3)
+        plot!(
+            [states_3[1,i] + ρs[2,3] * cos(θ) for θ in range(0,stop=2π,length=100)], 
+            [states_3[2,i] + ρs[2,3] * sin(θ) for θ in range(0,stop=2π,length=100)], 
+            color = :red, 
+            legend = false,
+            fillalpha = 0.1,
+            fill = true,
+        )
+        # Plot line from player 2 to hyperplane (1,2)
+        ni = ρs[1,2]*n(i, αs[1,2], ωs[1,2])
         plot!([states_2[1,i],states_2[1,i] + ni[1]],
               [states_2[2,i],states_2[2,i] + ni[2]],
               arrow = true,
-              color = :black)   
-        # Plot hyperplane
+              color = :blue)   
+        # Plot hyperplane (1,2)
         hyperplane_domain = 10*range(domain[1],domain[2],100)
         p_for_p2 = states_2[1:2,i] + ni
         plot!(hyperplane_domain .+ p_for_p2[1],
             [-ni[1]/ni[2]*x + p_for_p2[2] for x in hyperplane_domain],
             color = :blue,
         )
-        # Plot line from player 3 to hyperplane 1 
-        ni = ρs[2]*n(i, αs[2], ωs[2])
+        # Plot line from player 3 to hyperplane (1,3)
+        ni = ρs[1,3]*n(i, αs[1,3], ωs[1,3])
         plot!([states_3[1,i],states_3[1,i] + ni[1]],
               [states_3[2,i],states_3[2,i] + ni[2]],
               arrow = true,
-              color = :black)   
-        # Plot hyperplane 1
+              color = :blue)   
+        # Plot hyperplane (1,3)
         hyperplane_domain = 10*range(domain[1],domain[2],100)
         p_for_p3 = states_3[1:2,i] + ni
         plot!(hyperplane_domain .+ p_for_p3[1],
             [-ni[1]/ni[2]*x + p_for_p3[2] for x in hyperplane_domain],
             color = :blue,
         )
-        # Plot line from player 3 to hyperplane 2
-        ni = ρs[3]*n(i, αs[3], ωs[3])
+        # Plot line from player 3 to hyperplane (2,3)
+        ni = ρs[2,3]*n(i, αs[2,3], ωs[2,3])
         plot!([states_3[1,i],states_3[1,i] + ni[1]],
               [states_3[2,i],states_3[2,i] + ni[2]],
               arrow = true,
               color = :red)   
-        # Plot hyperplane 3
+        # Plot hyperplane (2,3)
         hyperplane_domain = 10*range(domain[1],domain[2],100)
         p_for_p3 = states_3[1:2,i] + ni
         plot!(hyperplane_domain .+ p_for_p3[1],
@@ -304,7 +310,7 @@ function visualize_rotating_hyperplanes(states, params)
         plot!(xlims = domain,
               ylims = domain)
     end
-    gif(anim, fps = 5, "rotating_hyperplane_"*params.title*".gif")
+    gif(anim, fps = 5, "rotating_hyperplanes_"*params.title*".gif")
 end    
 
 end
