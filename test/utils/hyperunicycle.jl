@@ -220,6 +220,9 @@ function DynamicsModelInterface.add_shared_jacobian!(system::HyperUnicycle, opt_
     idx_ego   = (1:2) .+ (couple[1] - 1)*system.n_states
     idx_owner = (1:2) .+ (couple[2] - 1)*system.n_states
     idx_other = setdiff(1:n_states_all, vcat(idx_ego, idx_owner))
+    println("       idx_ego   = $idx_ego")
+    println("       idx_owner = $idx_owner")
+    println("       idx_other = $idx_other")
 
     # Gradients of hyperplane constraints with respect to x
     n_cos = @variable(opt_model, [2:T])
@@ -227,33 +230,34 @@ function DynamicsModelInterface.add_shared_jacobian!(system::HyperUnicycle, opt_
     @NLconstraint(opt_model, [t = 2:T], n_cos[t] == cos(α + ω * (t-1)))
     @NLconstraint(opt_model, [t = 2:T], n_sin[t] == sin(α + ω * (t-1)))
 
-    dhdx = @variable(opt_model, [1, 1:n_states_all, 1:T])
+    dhdx = @variable(opt_model, [[1], 1:n_states_all, 1:T])
+
     # Elements corresponding to ego 
     @constraint(
         opt_model,
         [t = 2:T],
-        dhdx[1, idx_ego, t] .== 
+        dhdx[[1], idx_ego, t] .== 
         [
-             n_cos[t]
+             n_cos[t] 
              n_sin[t]
-        ]
+        ]'
     )
     # Elements corresponding to hyperplane owner 
     @constraint(
         opt_model,
         [t = 2:T],
-        dhdx[1, idx_owner, t] .== 
+        dhdx[[1], idx_owner, t] .== 
         [
-            -n_cos[t]
+            -n_cos[t] 
             -n_sin[t]
-        ]
+        ]'
     )
     # Rest of elements 
     @constraint(
         opt_model,
         [t = 2:T],
-        dhdx[1, idx_other, t] .== 
-        zeros((n_states - 2)*2 + n_states*(n_players - 2))
+        dhdx[[1], idx_other, t] .== 
+        zeros((n_states - 2)*2 + n_states*(n_players - 2))'
     )
 
     # # Original version

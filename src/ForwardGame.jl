@@ -190,7 +190,7 @@ function solve_game(
            !isempty(findall(constraint_params.adj_mat[player_idx,:]))
             dhdx_container = []
             λ_i_container  = []
-            s    = []
+            s_container    = []
             for owner_idx in findall(constraint_params.adj_mat[player_idx,:]) 
                 params = (;couple = CartesianIndex(player_idx, owner_idx), constraint_params...)
 
@@ -209,23 +209,28 @@ function solve_game(
                 append!(dhdx_container, [dhs.dx]) 
                 
                 # Add slack and dual variables corresponding to inequality constraints
-                append!(λ_i_container, [@variable(opt_model, [1:T])]')
+                λ_i_couple = @variable(opt_model, [1:T])
+                append!(λ_i_container, [λ_i_couple]')
+
                 s_couple = @variable(opt_model, [1:T], start = 0.001, lower_bound = 0.0)
+                append!(s_container, [s_couple])  
 
                 # Feasibility of barrier-ed constraints
                 @constraint(opt_model, [t = 1:T], hs(t) - s_couple[t] == 0.0)
-
-                # Add to vector of all slacks 
-                append!(s, s_couple)                
+                
+                println("   Added shared (& barrier-ed) constraints for couple ($player_idx, $owner_idx)")
             end
             # Make into a single array (easier to index into)
             dhdx = vcat(dhdx_container...)
             λ_i  = vcat(λ_i_container...)
+            s    = vcat(s_container...)
+            n_slacks = length(s)
+            println("   Total number of shared constraints = $n_slacks")
 
             # Gradient of the Lagrangian wrt x is zero 
             @constraint(opt_model, 
             [t = 2:(T-1)],
-            dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' - λ_e[:, t, player_idx]'*df.dx[:, :, t] + λ_i[:,t]'*dhdx[:,:,t] .== 0
+                dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' - λ_e[:, t, player_idx]'*df.dx[:, :, t] + λ_i[:,t]'*dhdx[:, :, t] .== 0
             )
             @constraint(opt_model, 
                 dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' + λ_i[:,T]'*dhdx[:, :, T] .== 0
@@ -234,13 +239,14 @@ function solve_game(
             # Gradient of the Lagrangian wrt player's own inputs is zero
             @constraint(opt_model, 
             [t = 1:(T-1)], 
-            dJ.du[player_inputs, t]' - λ_e[:,t,player_idx]'*df.du[:,player_inputs,t] .== 0)
+                dJ.du[player_inputs, t]' - λ_e[:, t, player_idx]'*df.du[:,player_inputs,t] .== 0)
             @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
 
             # Gradient of the Lagrangian wrt s is zero
-            s_inv = @variable(opt_model, [1:T])
-            @NLconstraint(opt_model, [t = 1:T], s_inv[t] == 1/s[t])
-            @constraint(opt_model, [t = 1:T], -μ*s_inv[t] - λ_i[t] == 0)
+            λ_i_reshaped = reshape(λ_i', (1, n_slacks))
+            s_inv = @variable(opt_model, [2:n_slacks])
+            @NLconstraint(opt_model, [t = 2:n_slacks], s_inv[t] == 1/s[t])
+            @constraint(opt_model, [t = 2:n_slacks], -μ*s_inv[t] - λ_i_reshaped[t] == 0)
         else
             # KKT Nash constraints
             @constraint(
@@ -256,6 +262,7 @@ function solve_game(
                 dJ.du[player_inputs, t] - (λ_e[:, t, player_idx]' * df.du[:, player_inputs, t])' .== 0
             )
             @constraint(opt_model, dJ.du[player_inputs, T] .== 0)            
+            println("Added KKT conditions for player $player_idx")
         end
      
     end

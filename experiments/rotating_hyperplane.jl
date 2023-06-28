@@ -30,11 +30,12 @@ constraint_params = (; adj_mat, ωs, ρs, αs)
 
 # Dynamics
 control_system =
-    TestDynamics.ProductSystem([TestDynamics.HyperUnicycle(0.25, ω, ρ), TestDynamics.Unicycle(0.25)])
+    TestDynamics.ProductSystem([TestDynamics.HyperUnicycle(0.25, 0.0, 0.0), TestDynamics.Unicycle(0.25)])
 
 # Initial position 
 player_angles = [0.0, pi/2]
-x0 = [-1.0, 0.0, 0.1, player_angles[1], 0.0, -1.0, 0.1, player_angles[2]]
+x0 = [-1.0, 0.0, 0.1, player_angles[1], 
+      0.0, -1.0, 0.1, player_angles[2]]
 
 # Costs
 player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
@@ -51,17 +52,19 @@ end
 ibr_converged, ibr_solution, ibr_models =
         solve_game(IBRGameSolver(), control_system, player_cost_models, x0, T)
 kkt_converged, kkt_solution, kkt_model = 
-        solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, T; solver = Ipopt.Optimizer, 
+        solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, T; 
+        solver = Ipopt.Optimizer, 
+        solver_attributes = (; max_wall_time = 60.0, print_level = 5),
         init = (;x = ibr_solution.x, u = ibr_solution.u),
         constraint_params = constraint_params)
 
 
 # ---- Save trajectory to file ----
-CSV.write("data/KKT_trajectory_state.csv", DataFrame(kkt_solution.x, :auto), header = false)
-CSV.write("data/KKT_trajectory_control.csv", DataFrame(kkt_solution.u, :auto), header = false)
-CSV.write("data/IBR_trajectory_state.csv", DataFrame(ibr_solution.x, :auto), header = false)
-CSV.write("data/IBR_trajectory_control.csv", DataFrame(ibr_solution.u, :auto), header = false)
+# CSV.write("data/KKT_trajectory_state.csv", DataFrame(kkt_solution.x, :auto), header = false)
+# CSV.write("data/KKT_trajectory_control.csv", DataFrame(kkt_solution.u, :auto), header = false)
+# CSV.write("data/IBR_trajectory_state.csv", DataFrame(ibr_solution.x, :auto), header = false)
+# CSV.write("data/IBR_trajectory_control.csv", DataFrame(ibr_solution.u, :auto), header = false)
 
 # ---- Animation with rotating hyperplane ----
-visualize_rotating_hyperplane(kkt_solution.x,(; ω = ω, ρ = ρ, title = "Forward"))
-visualize_rotating_hyperplane(ibr_solution.x,(; ω = ω, ρ = ρ, title = "IBR"))
+visualize_rotating_hyperplane(ibr_solution.x,(; ωs, ρs, αs, title = "IBR"))
+visualize_rotating_hyperplane(kkt_solution.x,(; ωs, ρs, αs, title = "KKT"))

@@ -85,12 +85,12 @@ function solve_optimal_control(
 
     
     @warn "remove hardocoded stuff (and hyperplane from here)"
-    # n_players = 3
-    # ωs = [0.03, 0.03, -0.03]
-    # ρs = [0.25, 0.25,  0.1]
-    n_players = 2
-    ωs = [0.03, 0.03]
-    ρs = [0.25, 0.25]
+    n_players = 3
+    ωs = [0.03, 0.03, -0.03]
+    ρs = [0.25, 0.25,  0.1]
+    # n_players = 2
+    # ωs = [0.03, 0.03]
+    # ρs = [0.25, 0.25]
     n_states_per_player = control_system.subsystems[1].n_states
 
     # Add hyperplane constraints (centered around player 1)
