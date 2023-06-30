@@ -68,14 +68,14 @@ ibr_converged, ibr_solution, ibr_models =
 kkt_converged, kkt_solution, kkt_model = 
         solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, T; 
         solver = Ipopt.Optimizer, 
-        solver_attributes = (; max_wall_time = 180.0, print_level = 5),
+        solver_attributes = (; max_wall_time = 60.0, print_level = 5),
         init = (;x = ibr_solution.x, u = ibr_solution.u), 
         constraint_params = constraint_params)
 
 
 # ---- Save trajectory to file ----
-# CSV.write("data/KKT_trajectory_state.csv", DataFrame(kkt_solution.x, :auto), header = false)
-# CSV.write("data/KKT_trajectory_control.csv", DataFrame(kkt_solution.u, :auto), header = false)
+CSV.write("data/KKT_trajectory_state.csv", DataFrame(kkt_solution.x, :auto), header = false)
+CSV.write("data/KKT_trajectory_control.csv", DataFrame(kkt_solution.u, :auto), header = false)
 # CSV.write("data/IBR_trajectory_state.csv", DataFrame(ibr_solution.x, :auto), header = false)
 # CSV.write("data/IBR_trajectory_control.csv", DataFrame(ibr_solution.u, :auto), header = false)
 

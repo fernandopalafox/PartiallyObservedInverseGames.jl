@@ -165,13 +165,21 @@ function solve_game(
     opt_model = JuMP.Model(solver)
     JuMPUtils.set_solver_attributes!(opt_model; solver_attributes...)
 
-    # Decision Variables
-    x = @variable(opt_model, [1:n_states, 1:T])
-    u = @variable(opt_model, [1:n_controls, 1:T])
-    λ_e = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
+    # Indices used to match each player with its relevant couples
+    if !isnothing(constraint_params.adj_mat)
+        couples = findall(constraint_params.adj_mat)
+        player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
+    end
 
+    # Decision Variables
+    x       = @variable(opt_model, [1:n_states, 1:T])
+    u       = @variable(opt_model, [1:n_controls, 1:T])
+    λ_e     = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
+    λ_i_all = @variable(opt_model, [1:length(couples), 1:T]) # Assumes constraints apply to all timesteps. All constraints the same
+    s_all   = @variable(opt_model, [1:length(couples), 1:T], start = 0.001, lower_bound = 0.0)     
+      
     # Initialization
-    JuMPUtils.init_if_hasproperty!(λ_e, init, :λ_e)
+    # JuMPUtils.init_if_hasproperty!(λ_e, init, :λ_e)
     # JuMPUtils.init_if_hasproperty!(λ_i, init, :λ_i)
     JuMPUtils.init_if_hasproperty!(x, init, :x)
     JuMPUtils.init_if_hasproperty!(u, init, :u)
@@ -186,13 +194,16 @@ function solve_game(
         dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
 
         # Adjacency matrix denotes shared inequality constraint
-        if !isnothing(constraint_params.adj_mat) & 
-           !isempty(findall(constraint_params.adj_mat[player_idx,:]))
+        if !isnothing(constraint_params.adj_mat) && 
+           !isempty(player_couples[player_idx])
+
+            # Extract relevant lms and slacks
+            λ_i  = λ_i_all[player_couples[player_idx], :]
+            s    = s_all[player_couples[player_idx], :]
+
             dhdx_container = []
-            λ_i_container  = []
-            s_container    = []
-            for owner_idx in findall(constraint_params.adj_mat[player_idx,:]) 
-                params = (;couple = CartesianIndex(player_idx, owner_idx), constraint_params...)
+            for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
+                params = (;couple, constraint_params...)
 
                 # Extract shared constraint for player couple 
                 hs = DynamicsModelInterface.add_shared_constraint!(
@@ -207,26 +218,12 @@ function solve_game(
                 # Stack shared constraint Jacobian. 
                 # One row per couple, timestep indexing along 3rd axis
                 append!(dhdx_container, [dhs.dx]) 
-                
-                # Add slack and dual variables corresponding to inequality constraints
-                λ_i_couple = @variable(opt_model, [1:T])
-                append!(λ_i_container, [λ_i_couple]')
-
-                s_couple = @variable(opt_model, [1:T], start = 0.001, lower_bound = 0.0)
-                append!(s_container, [s_couple])  
 
                 # Feasibility of barrier-ed constraints
-                @constraint(opt_model, [t = 1:T], hs(t) - s_couple[t] == 0.0)
-                
-                println("   Added shared (& barrier-ed) constraints for couple ($player_idx, $owner_idx)")
+                @constraint(opt_model, [t = 1:T], hs(t) - s[couple_idx, t] == 0.0)
             end
-            # Make into a single array (easier to index into)
             dhdx = vcat(dhdx_container...)
-            λ_i  = vcat(λ_i_container...)
-            s    = vcat(s_container...)
-            n_slacks = length(s)
-            println("   Total number of shared constraints = $n_slacks")
-
+        
             # Gradient of the Lagrangian wrt x is zero 
             @constraint(opt_model, 
             [t = 2:(T-1)],
@@ -243,10 +240,13 @@ function solve_game(
             @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
 
             # Gradient of the Lagrangian wrt s is zero
-            λ_i_reshaped = reshape(λ_i', (1, n_slacks))
-            s_inv = @variable(opt_model, [2:n_slacks])
-            @NLconstraint(opt_model, [t = 2:n_slacks], s_inv[t] == 1/s[t])
+            n_slacks     = length(s)
+            λ_i_reshaped = reshape(λ_i', (1, :))
+            s_reshaped   = reshape(s' , (1, :))
+            s_inv        = @variable(opt_model, [2:n_slacks])
+            @NLconstraint(opt_model, [t = 2:n_slacks], s_inv[t] == 1/s_reshaped[t])
             @constraint(opt_model, [t = 2:n_slacks], -μ*s_inv[t] - λ_i_reshaped[t] == 0)
+            
         else
             # KKT Nash constraints
             @constraint(
@@ -262,7 +262,7 @@ function solve_game(
                 dJ.du[player_inputs, t] - (λ_e[:, t, player_idx]' * df.du[:, player_inputs, t])' .== 0
             )
             @constraint(opt_model, dJ.du[player_inputs, T] .== 0)            
-            println("Added KKT conditions for player $player_idx")
+            # println("Added KKT conditions for player $player_idx")
         end
      
     end
@@ -278,7 +278,7 @@ function solve_game(
     time = @elapsed JuMP.optimize!(opt_model)
     verbose && @info time
 
-    JuMPUtils.isconverged(opt_model), JuMPUtils.get_values(; x, u), opt_model
+    JuMPUtils.isconverged(opt_model), JuMPUtils.get_values(; x, u, λ_e, λ_i_all, s_all), opt_model
 end
 
 end
