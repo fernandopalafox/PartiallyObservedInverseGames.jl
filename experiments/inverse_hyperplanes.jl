@@ -37,6 +37,10 @@ end
 ΔT = 0.25
 solver_attributes = (; print_level = 5, expect_infeasible_problem = "no")
 
+# Setup warmstart
+init = (;λ_e = kkt_solution.λ_e, λ_i_all = kkt_solution.λ_i_all, 
+         s_all = kkt_solution.s_all)
+
 # ---- Solve ---- 
 
 # Presumed system dynamics
@@ -107,14 +111,13 @@ if !isnothing(constraint_params.adj_mat)
     player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
 end
 
-# Other decision variables
 x       = data_states
 u       = data_controls
 λ_e     = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
 λ_i_all = @variable(opt_model, [1:length(couples), 1:T]) # Assumes constraints apply to all timesteps. All constraints the same
 s_all   = @variable(opt_model, [1:length(couples), 1:T], start = 0.001, lower_bound = 0.0)     
 
-# Warms start on decision variables
+# ---- Warmstart on decision variables ----
 init_if_hasproperty!(λ_e, init, :λ_e)
 init_if_hasproperty!(λ_i_all, init, :λ_i_all)
 init_if_hasproperty!(s_all, init, :s_all)
