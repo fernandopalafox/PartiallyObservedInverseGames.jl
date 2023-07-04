@@ -185,14 +185,13 @@ function DynamicsModelInterface.add_shared_constraint!(system::HyperUnicycle, op
     end
 
     # Intersection of hyperplane w/ KoZ
-    function p(t)
-        x_other = x[idx_other, t]
-        x_other + ρ .* n(t)
-    end
+    p = @variable(opt_model, [1:2, 1:T])
+    @NLconstraint(opt_model, [t = 1:T], p[1,t] == x[idx_other[1], t] + ρ*n_cos[t])
+    @NLconstraint(opt_model, [t = 1:T], p[2,t] == x[idx_other[2], t] + ρ*n_sin[t])
 
     # Define constraint
     function h(t)
-        n(t)' * (x[idx_ego, t] - p(t))
+        n(t)' * (x[idx_ego, t] - p[:,t])
     end
 
     # Set constraints
