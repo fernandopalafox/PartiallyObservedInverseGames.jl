@@ -38,8 +38,7 @@ end
 solver_attributes = (; print_level = 5, expect_infeasible_problem = "no")
 
 # Setup warmstart
-init = (;λ_e = kkt_solution.λ_e, λ_i_all = kkt_solution.λ_i_all, 
-         s_all = kkt_solution.s_all)
+init = nothing
 
 # ---- Solve ---- 
 
@@ -168,7 +167,7 @@ end
 time = @elapsed JuMP.optimize!(opt_model)
 @info time
 
-solution = get_values(;x, u, uk_ωs, uk_αs, uk_ρs, uk_weights)
+solution = merge((;x,u), get_values(;uk_ωs, uk_αs, uk_ρs, uk_weights))
 k_ωs = [0.0 solution.uk_ωs[1] solution.uk_ωs[2];
         0.0 0.0               solution.uk_ωs[3];
         0.0 0.0               0.0]
@@ -179,4 +178,4 @@ k_ρs = [0.0 solution.uk_ρs[1] solution.uk_ρs[2];
         0.0 0.0               solution.uk_ρs[3];
         0.0 0.0               0.0]
 
-visualize_rotating_hyperplanes(solution.x,(; ωs = k_ωs, αs = k_αs, ρs = k_ρs, title = "Inverse"))
+visualize_rotating_hyperplanes(solution.x,(; ωs = k_ωs, αs = k_αs, ρs = k_ρs, title = "Inverse"));
