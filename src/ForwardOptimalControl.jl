@@ -86,8 +86,9 @@ function solve_optimal_control(
     
     @warn "remove hardocoded stuff (and hyperplane from here)"
     n_players = 3
-    ωs = [0.03, 0.03, -0.03]
-    ρs = [0.25, 0.25,  0.1]
+    ωs = [0.05, 0.05, 0.05]
+    ρs = [0.25, 0.25,  0.25]
+    αs = [3/4*pi,  pi, 5/4*pi]
     # n_players = 2
     # ωs = [0.03, 0.03]
     # ρs = [0.25, 0.25]
@@ -104,8 +105,7 @@ function solve_optimal_control(
         idx_other = [1 + index_offset, 2 + index_offset]
 
         # Calculate hyperplane normal 
-        n0 = x0[idx_ego] - x0[idx_other]
-        α = atan(n0[2],n0[1])
+        α = αs[i]
 
         # Define useful vectors
         function n(t) 
@@ -124,16 +124,15 @@ function solve_optimal_control(
     # for i in 3:3
     #     index_offset = n_states_per_player * i
     #     # Parameters
-    #     ρ = ρs[3] # KoZ radius
-    #     ω = ωs[3] # Angular velocity of hyperplane
+    #     ρ = ρs[i] # KoZ radius
+    #     ω = ωs[i] # Angular velocity of hyperplane
 
     #     # Ego indices
-    #     idx_ego = [1, 2]
-    #     idx_other = [5, 6]
+    #     idx_ego = [5, 6]
+    #     idx_other = [9, 10]
         
     #     # Calculate hyperplane normal 
-    #     n0 = x0[idx_ego] - x0[idx_other]
-    #     α = atan(n0[2],n0[1])
+    #     α = αs[i]
 
     #     # Define useful vectors
     #     function n(t) 
