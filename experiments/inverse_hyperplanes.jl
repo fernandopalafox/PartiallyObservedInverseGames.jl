@@ -75,7 +75,7 @@ player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
 end
 
 # ---- USER INPUT: Setup unknown parameters ----
-uk_ωs = @variable(opt_model, [1:3], lower_bound = -pi/3, upper_bound = pi/3)
+uk_ωs = @variable(opt_model, [1:3], lower_bound = -0.5, upper_bound = 0.5)
 uk_αs = @variable(opt_model, [1:3], lower_bound = -pi, upper_bound = pi)
 JuMP.set_start_value(uk_ωs[3], -0.05) 
 
