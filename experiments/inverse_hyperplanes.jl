@@ -77,13 +77,15 @@ end
 # ---- USER INPUT: Setup unknown parameters ----
 uk_ωs = @variable(opt_model, [1:3], lower_bound = -0.5, upper_bound = 0.5)
 uk_αs = @variable(opt_model, [1:3], lower_bound = -pi, upper_bound = pi)
+uk_ρs = @variable(opt_model, [1:3], lower_bound = 0.1, upper_bound = 1)
+
 JuMP.set_start_value(uk_ωs[3], -0.05) 
 
 ωs = [0.0 uk_ωs[1] uk_ωs[2];
       0.0 0.0      uk_ωs[3];
       0.0 0.0      0.0]
-ρs = [0.0 0.25     0.25;
-      0.0 0.0      0.1;
+ρs = [0.0 uk_ρs[1] uk_ρs[2];
+      0.0 0.0      uk_ρs[3];
       0.0 0.0      0.0]
 αs = [0.0 uk_αs[1] uk_αs[2];
       0.0 0.0      uk_αs[3];
@@ -161,13 +163,15 @@ end
 time = @elapsed JuMP.optimize!(opt_model)
 @info time
 
-solution = get_values(;x, u, uk_ωs, uk_αs)
+solution = get_values(;x, u, uk_ωs, uk_αs, uk_ρs)
 k_ωs = [0.0 solution.uk_ωs[1] solution.uk_ωs[2];
         0.0 0.0               solution.uk_ωs[3];
         0.0 0.0               0.0]
 k_αs = [0.0 solution.uk_αs[1] solution.uk_αs[2];
         0.0 0.0               solution.uk_αs[3];
         0.0 0.0               0.0]
-k_ρs = ρs
+k_ρs = [0.0 solution.uk_ρs[1] solution.uk_ρs[2];
+        0.0 0.0               solution.uk_ρs[3];
+        0.0 0.0               0.0]
 
 visualize_rotating_hyperplanes(solution.x,(; ωs = k_ωs, αs = k_αs, ρs = k_ρs, title = "Inverse"))
