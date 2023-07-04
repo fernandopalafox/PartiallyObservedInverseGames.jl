@@ -58,8 +58,10 @@ set_solver_attributes!(opt_model; solver_attributes...)
 JuMP.set_time_limit_sec(opt_model, 80.0)
 
 # Load observation data
-data_states   = Matrix(CSV.read("data/KKT_trajectory_state.csv", DataFrame, header = false))
-data_controls = Matrix(CSV.read("data/KKT_trajectory_control.csv", DataFrame, header = false))
+# data_states   = Matrix(CSV.read("data/KKT_trajectory_state.csv", DataFrame, header = false))
+# data_controls = Matrix(CSV.read("data/KKT_trajectory_control.csv", DataFrame, header = false))
+data_states   = Matrix(CSV.read("data/fwd_unicycles_state.csv", DataFrame, header = false))
+data_controls = Matrix(CSV.read("data/fwd_unicycles_control.csv", DataFrame, header = false))
 
 # Compute values from data
 T             = size(data_states,2)
@@ -69,11 +71,9 @@ player_angles = data_states[4:n_states_per_player:n_states,1]
 # ---- USER INPUT: Setup unknown parameters ----
 
 # Constraint parameters
-uk_ωs = @variable(opt_model, [1:3], lower_bound = -0.5, upper_bound = 0.5)
+uk_ωs = @variable(opt_model, [1:3], lower_bound = -0.1, upper_bound = 0.1)
 uk_αs = @variable(opt_model, [1:3], lower_bound = -pi, upper_bound = pi)
 uk_ρs = @variable(opt_model, [1:3], lower_bound = 0.1, upper_bound = 1)
-
-JuMP.set_start_value(uk_ωs[3], -0.05) 
 
 ωs = [0.0 uk_ωs[1] uk_ωs[2];
       0.0 0.0      uk_ωs[3];
