@@ -243,6 +243,7 @@ function solve_game(
 
     n_players = length(player_cost_models)
     @unpack n_states, n_controls = control_system
+    n_states_per_player = Int(n_states/n_players)
 
     opt_model = JuMP.Model(solver)
     JuMPUtils.set_solver_attributes!(opt_model; solver_attributes...)
@@ -251,14 +252,14 @@ function solve_game(
     if !isnothing(constraint_params.adj_mat)
         couples = findall(constraint_params.adj_mat)
         player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
+        λ_i_all = @variable(opt_model, [1:length(couples), 1:T]) # Assumes constraints apply to all timesteps. All constraints the same
+        s_all   = @variable(opt_model, [1:length(couples), 1:T], start = 0.001, lower_bound = 0.0)     
     end
 
     # Decision Variables
     x       = @variable(opt_model, [1:n_states, 1:T])
     u       = @variable(opt_model, [1:n_controls, 1:T])
     λ_e     = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
-    λ_i_all = @variable(opt_model, [1:length(couples), 1:T]) # Assumes constraints apply to all timesteps. All constraints the same
-    s_all   = @variable(opt_model, [1:length(couples), 1:T], start = 0.001, lower_bound = 0.0)     
       
     # Initialization
     # JuMPUtils.init_if_hasproperty!(λ_e, init, :λ_e)
@@ -266,14 +267,20 @@ function solve_game(
     JuMPUtils.init_if_hasproperty!(x, init, :x)
     JuMPUtils.init_if_hasproperty!(u, init, :u)
 
-    # constraints
+    # Initial state constraint
     @constraint(opt_model, x[:, 1] .== x0)
+
+    # Dynamics constraints
     DynamicsModelInterface.add_dynamics_constraints!(control_system, opt_model, x, u)
     df = DynamicsModelInterface.add_dynamics_jacobians!(control_system, opt_model, x, u)
 
     for (player_idx, cost_model) in enumerate(player_cost_models)
         @unpack player_inputs, weights = cost_model
         dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
+
+        # Add terminal state constraint
+        pos_idx = [1, 2] .+ (player_idx - 1)*n_states_per_player
+        @constraint(opt_model, x[pos_idx, T] .== cost_model.goal_position)
 
         # Adjacency matrix denotes shared inequality constraint
         if !isnothing(constraint_params.adj_mat) && 
