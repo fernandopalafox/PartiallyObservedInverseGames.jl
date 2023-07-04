@@ -83,21 +83,30 @@ function solve_game(
     init = (),
     match_equilibrium = nothing,
     verbose = false,
+    constraint_params = (; adj_mat = nothing),
 )
 
     n_players = length(player_cost_models)
     @unpack n_states, n_controls = control_system
+    n_states_per_player = Int(n_states/n_players)
 
     opt_model = JuMP.Model(solver)
     JuMPUtils.set_solver_attributes!(opt_model; solver_attributes...)
 
+    # Couples and vars for shared constraints
+    if !isnothing(constraint_params.adj_mat)
+        couples = findall(constraint_params.adj_mat)
+        player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
+        λ_i_all = @variable(opt_model, [1:length(couples), 1:T])
+    end
+
     # Decision Variables
     x = @variable(opt_model, [1:n_states, 1:T])
     u = @variable(opt_model, [1:n_controls, 1:T])
-    λ = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
+    λ_e     = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
 
     # Initialization
-    JuMPUtils.init_if_hasproperty!(λ, init, :λ)
+    JuMPUtils.init_if_hasproperty!(λ_e, init, :λ_e)
     JuMPUtils.init_if_hasproperty!(x, init, :x)
     JuMPUtils.init_if_hasproperty!(u, init, :u)
 
@@ -106,24 +115,94 @@ function solve_game(
     DynamicsModelInterface.add_dynamics_constraints!(control_system, opt_model, x, u)
     df = DynamicsModelInterface.add_dynamics_jacobians!(control_system, opt_model, x, u)
 
+    # for (player_idx, cost_model) in enumerate(player_cost_models)
+    #     @unpack player_inputs, weights = cost_model
+    #     dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
+
+    #     # KKT Nash constraints
+    #     @constraint(
+    #         opt_model,
+    #         [t = 2:(T - 1)],
+    #         dJ.dx[:, t] + λ[:, t - 1, player_idx] - (λ[:, t, player_idx]' * df.dx[:, :, t])' .== 0
+    #     )
+    #     @constraint(opt_model, dJ.dx[:, T] + λ[:, T - 1, player_idx] .== 0)
+
+    #     @constraint(
+    #         opt_model,
+    #         [t = 1:(T - 1)],
+    #         dJ.du[player_inputs, t] - (λ[:, t, player_idx]' * df.du[:, player_inputs, t])' .== 0
+    #     )
+    #     @constraint(opt_model, dJ.du[player_inputs, T] .== 0)
+    # end
+
     for (player_idx, cost_model) in enumerate(player_cost_models)
         @unpack player_inputs, weights = cost_model
         dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
 
-        # KKT Nash constraints
-        @constraint(
-            opt_model,
-            [t = 2:(T - 1)],
-            dJ.dx[:, t] + λ[:, t - 1, player_idx] - (λ[:, t, player_idx]' * df.dx[:, :, t])' .== 0
-        )
-        @constraint(opt_model, dJ.dx[:, T] + λ[:, T - 1, player_idx] .== 0)
+        # Add terminal state constraint
+        pos_idx = [1, 2] .+ (player_idx - 1)*n_states_per_player
+        @constraint(opt_model, x[pos_idx, T] .== cost_model.goal_position)
 
-        @constraint(
-            opt_model,
-            [t = 1:(T - 1)],
-            dJ.du[player_inputs, t] - (λ[:, t, player_idx]' * df.du[:, player_inputs, t])' .== 0
-        )
-        @constraint(opt_model, dJ.du[player_inputs, T] .== 0)
+        # Adjacency matrix denotes shared inequality constraint
+        if !isnothing(constraint_params.adj_mat) && 
+            !isempty(player_couples[player_idx])
+
+            # Extract relevant lms and slacks
+            λ_i  = λ_i_all[player_couples[player_idx], :]
+
+            dhdx_container = []
+            for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
+                params = (;couple, constraint_params...)
+
+                # Extract shared constraint for player couple 
+                _ = DynamicsModelInterface.add_shared_constraint!(
+                                        control_system.subsystems[player_idx], opt_model, x, u, params; set = true
+                                    )
+
+                # Extract shared constraint Jacobian 
+                dhs = DynamicsModelInterface.add_shared_jacobian!(
+                                        control_system.subsystems[player_idx], opt_model, x, u, params
+                                    )
+
+                # Stack shared constraint Jacobian. 
+                # One row per couple, timestep indexing along 3rd axis
+                append!(dhdx_container, [dhs.dx]) 
+
+            end
+            dhdx = vcat(dhdx_container...)
+        
+            # Gradient of the Lagrangian wrt x is zero 
+            @constraint(opt_model, 
+            [t = 2:(T-1)],
+                dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' - λ_e[:, t, player_idx]'*df.dx[:, :, t] + λ_i[:,t]'*dhdx[:, :, t] .== 0
+            )
+            @constraint(opt_model, 
+                dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' + λ_i[:,T]'*dhdx[:, :, T] .== 0
+            )   
+
+            # Gradient of the Lagrangian wrt player's own inputs is zero
+            @constraint(opt_model, 
+            [t = 1:(T-1)], 
+                dJ.du[player_inputs, t]' - λ_e[:, t, player_idx]'*df.du[:,player_inputs,t] .== 0)
+            @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
+            
+        else
+            # KKT Nash constraints
+            @constraint(
+                opt_model,
+                [t = 2:(T - 1)],
+                dJ.dx[:, t] + λ_e[:, t - 1, player_idx] - (λ_e[:, t, player_idx]' * df.dx[:, :, t])' .== 0
+            )
+            @constraint(opt_model, dJ.dx[:, T] + λ_e[:, T - 1, player_idx] .== 0)
+
+            @constraint(
+                opt_model,
+                [t = 1:(T - 1)],
+                dJ.du[player_inputs, t] - (λ_e[:, t, player_idx]' * df.du[:, player_inputs, t])' .== 0
+            )
+            @constraint(opt_model, dJ.du[player_inputs, T] .== 0)            
+            # println("Added KKT conditions for player $player_idx")
+        end
     end
 
     if !isnothing(match_equilibrium)
@@ -137,7 +216,10 @@ function solve_game(
     time = @elapsed JuMP.optimize!(opt_model)
     verbose && @info time
 
-    JuMPUtils.isconverged(opt_model), JuMPUtils.get_values(; x, u, λ), opt_model
+    var_vals = !isnothing(constraint_params.adj_mat) ? 
+    JuMPUtils.get_values(; x, u, λ_e, λ_i_all) : JuMPUtils.get_values(; x, u, λ_e)
+
+    JuMPUtils.isconverged(opt_model), var_vals, opt_model
 end
 
 struct KKTGameSolverBarrier end
