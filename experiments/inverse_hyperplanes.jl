@@ -67,18 +67,9 @@ T             = size(data_states,2)
 x0            = data_states[:,1]
 player_angles = data_states[4:n_states_per_player:n_states,1]
 
-# Set costs
-player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
-    cost_model_p1 = CollisionAvoidanceGame.generate_player_cost_model_simple(;
-        player_idx = ii,
-        control_system,
-        T,
-        goal_position = unitvector(player_angle),
-        weights = (; control_Δv = 10, control_Δθ = 1, state_goal = 1)
-    )
-end
-
 # ---- USER INPUT: Setup unknown parameters ----
+
+# Constraint parameters
 uk_ωs = @variable(opt_model, [1:3], lower_bound = -0.5, upper_bound = 0.5)
 uk_αs = @variable(opt_model, [1:3], lower_bound = -pi, upper_bound = pi)
 uk_ρs = @variable(opt_model, [1:3], lower_bound = 0.1, upper_bound = 1)
@@ -99,10 +90,21 @@ adj_mat = [false true  true;
            false false true;
            false false false]
 
-init = (;λ_e = kkt_solution.λ_e, λ_i_all = kkt_solution.λ_i_all, 
-         s_all = kkt_solution.s_all)
-
 constraint_params = (; adj_mat, ωs, αs, ρs)
+
+# Cost parameters
+uk_weights = @variable(opt_model, [1:3], lower_bound = 0.0)
+@constraint(opt_model, sum(uk_weights) == 1) #regularization 
+
+player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
+    cost_model_p1 = CollisionAvoidanceGame.generate_player_cost_model_simple(;
+        player_idx = ii,
+        control_system,
+        T,
+        goal_position = unitvector(player_angle),
+        weights = (; control_Δv = uk_weights[1], control_Δθ = uk_weights[2], state_goal = uk_weights[3])
+    )
+end
 
 # ---- Setup decision variables ----
 
@@ -166,7 +168,7 @@ end
 time = @elapsed JuMP.optimize!(opt_model)
 @info time
 
-solution = get_values(;x, u, uk_ωs, uk_αs, uk_ρs)
+solution = get_values(;x, u, uk_ωs, uk_αs, uk_ρs, uk_weights)
 k_ωs = [0.0 solution.uk_ωs[1] solution.uk_ωs[2];
         0.0 0.0               solution.uk_ωs[3];
         0.0 0.0               0.0]
