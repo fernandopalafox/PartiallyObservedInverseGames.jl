@@ -25,20 +25,17 @@ T = 75
 control_system =
     TestDynamics.ProductSystem([TestDynamics.Unicycle(0.25), 
                                 TestDynamics.Unicycle(0.25), 
+                                TestDynamics.Unicycle(0.25), 
                                 TestDynamics.Unicycle(0.25)])
-# control_system =
-#     TestDynamics.ProductSystem([TestDynamics.Unicycle(0.25), 
-#                                 TestDynamics.Unicycle(0.25)])
-
 
 # Initial position 
-player_angles = [0.0, pi/2, pi]
-x0 = [-1.0,  0.0, 0.3, -deg2rad(30), 
-       0.0, -1.0, 0.3,  pi/2 - deg2rad(30),
-       1.0,  0.0, 0.3,  pi - deg2rad(30)]
-# player_angles = [0.0, pi]
-# x0 = [-1.0,  0.0, 0.5, -pi/2, 
-#        1.0,  0.0, 0.5,  pi/2]
+player_angles = [0.0, pi/2, pi, -pi/2]
+offset = 90
+x0 = [-1.0,  0.0, 0.3, player_angles[1] - deg2rad(offset), 
+       0.0, -1.0, 0.3, player_angles[2] - deg2rad(offset),
+       1.0,  0.0, 0.3, player_angles[3] - deg2rad(offset), 
+       0.0,  1.0, 0.3, player_angles[4] - deg2rad(offset)]
+
 # Costs
 player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
     cost_model_p1 = CollisionAvoidanceGame.generate_player_cost_model(;
@@ -47,7 +44,7 @@ player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
         T,
         goal_position = round.(unitvector(player_angle)),
         weights = (; 
-            state_proximity = 1, 
+            state_proximity = 0.5, 
             state_velocity = 1, 
             control_Δv = 1, 
             control_Δθ = 1),
@@ -66,4 +63,11 @@ CSV.write("data/fwd_unicycles_state.csv", DataFrame(kkt_solution.x, :auto), head
 CSV.write("data/fwd_unicycles_control.csv", DataFrame(kkt_solution.u, :auto), header = false)
 
 # ---- Animation trajectories ----
-animate_trajectory(kkt_solution.x, (;title = "unicycles"))
+animate_trajectory(
+        kkt_solution.x, 
+        (;
+            title = "unicycles", 
+            n_players = length(control_system.subsystems), 
+            n_states_per_player = 4
+        )
+    )
