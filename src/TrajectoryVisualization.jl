@@ -313,4 +313,44 @@ function visualize_rotating_hyperplanes(states, params)
     gif(anim, fps = 5, "rotating_hyperplanes_"*params.title*".gif")
 end    
 
+function animate_trajectory(states, params)
+    pos_idx = vcat(
+        [[1 2] .+ (player - 1) * params.n_states_per_player for player in 1:(params.n_players)]...,
+    )
+
+    # Plot limits
+    x_domain = extrema(states[pos_idx[:, 1], :]) .+ (-0.01, 0.01)
+    y_domain = extrema(states[pos_idx[:, 2], :]) .+ (-0.01, 0.01)
+    domain = [minimum([x_domain[1], y_domain[1]]), maximum([x_domain[2], y_domain[2]])]
+
+    T = size(states, 2)
+    colors = palette(:default)[1:(params.n_players)]
+
+    # Animation of trajectory 
+    anim = @animate for i in 1:T
+
+        # Plot trajectories
+        plot(
+            [states[pos_idx[player, 1], 1:i] for player in 1:(params.n_players)],
+            [states[pos_idx[player, 2], 1:i] for player in 1:(params.n_players)],
+            legend = false,
+            title = params.title,
+            xlabel = "x",
+            ylabel = "y",
+            size = (500, 500),
+            xlims = domain,
+            ylims = domain,
+        )
+        scatter!(
+            [states[pos_idx[player, 1], i] for player in 1:(params.n_players)],
+            [states[pos_idx[player, 2], i] for player in 1:(params.n_players)],
+            markersize = 5,
+            color = colors,
+        )
+        # Set domain
+        plot!(xlims = domain, ylims = domain)
+    end
+    gif(anim, fps = 5, params.title * ".gif")
+end
+
 end
