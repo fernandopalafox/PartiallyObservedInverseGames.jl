@@ -140,8 +140,8 @@ function solve_game(
         dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
 
         # Add terminal state constraint
-        pos_idx = [1, 2] .+ (player_idx - 1)*n_states_per_player
-        @constraint(opt_model, x[pos_idx, T] .== cost_model.goal_position)
+        # pos_idx = [1, 2] .+ (player_idx - 1)*n_states_per_player
+        # @constraint(opt_model, x[pos_idx, T] .== cost_model.goal_position)
 
         # Adjacency matrix denotes shared inequality constraint
         if !isnothing(constraint_params.adj_mat) && 
