@@ -22,27 +22,28 @@ T = 75
 
 # Dynamics
 # TODO: constraint params should be specified by each player when the control system is initialized. Not by a global adj matrix
-control_system =
-    TestDynamics.ProductSystem([TestDynamics.Unicycle(0.25), 
-                                TestDynamics.Unicycle(0.25), 
-                                TestDynamics.Unicycle(0.25), 
-                                TestDynamics.Unicycle(0.25)])
-
-# Initial position 
-player_angles = [0.0, pi/2, pi, -pi/2]
+n_players = 4
+v_init = 0.3
 offset = 90
-x0 = [-1.0,  0.0, 0.3, player_angles[1] - deg2rad(offset), 
-       0.0, -1.0, 0.3, player_angles[2] - deg2rad(offset),
-       1.0,  0.0, 0.3, player_angles[3] - deg2rad(offset), 
-       0.0,  1.0, 0.3, player_angles[4] - deg2rad(offset)]
+scale  = 1.0
+control_system = TestDynamics.ProductSystem([TestDynamics.Unicycle(0.25) for _ in 1:n_players])
+angles = [2*pi/n_players * (i-1) for i in 1:n_players]
+angles = [angle > pi ? angle - 2*pi : angle for angle in angles]
+
+x0 = vcat(
+    [
+        vcat(-scale*round.(unitvector(angle)), [v_init, angle - deg2rad(offset)]) for
+        angle in angles
+    ]...,
+)
 
 # Costs
-player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
+player_cost_models = map(enumerate(angles)) do (ii, angle)
     cost_model_p1 = CollisionAvoidanceGame.generate_player_cost_model(;
         player_idx = ii,
         control_system,
         T,
-        goal_position = round.(unitvector(player_angle)),
+        goal_position = scale*round.(unitvector(angle), digits = 6),
         weights = (; 
             state_proximity = 0.5, 
             state_velocity = 1, 
@@ -55,7 +56,7 @@ end
 kkt_converged, kkt_solution, kkt_model = 
         solve_game(KKTGameSolver(), control_system, player_cost_models, x0, T; 
         solver = Ipopt.Optimizer, 
-        solver_attributes = (; max_wall_time = 120.0, print_level = 5))
+        solver_attributes = (; max_wall_time = 300.0, print_level = 5))
 
 
 # ---- Save trajectory to file ----
