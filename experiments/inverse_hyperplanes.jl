@@ -33,9 +33,17 @@ function init_if_hasproperty!(v, init, sym; default = nothing)
 end
 
 # ---- USER INPUT: Solver settings ----
+
+T_activate_goalcost = 1
+ΔT = 0.1
+n_players = 4
+scale = 1
+
 μ = 0.00001
-ΔT = 0.25
 solver_attributes = (; print_level = 5, expect_infeasible_problem = "no")
+n_couples = 6
+
+T_trim = T
 
 # Setup warmstart
 init = nothing
@@ -43,14 +51,15 @@ init = nothing
 # ---- Solve ---- 
 
 # Presumed system dynamics
-control_system =
-    TestDynamics.ProductSystem([TestDynamics.HyperUnicycle(ΔT, 0.0, 0.0), 
-                                TestDynamics.HyperUnicycle(ΔT, 0.0, 0.0),
-                                TestDynamics.HyperUnicycle(ΔT, 0.0, 0.0),
-                                TestDynamics.Unicycle(ΔT)])
+# control_system =
+#     TestDynamics.ProductSystem([TestDynamics.HyperUnicycle(ΔT, 0.0, 0.0), 
+#                                 TestDynamics.HyperUnicycle(ΔT, 0.0, 0.0),
+#                                 TestDynamics.HyperUnicycle(ΔT, 0.0, 0.0),
+#                                 TestDynamics.Unicycle(ΔT)])
+
+control_system = TestDynamics.ProductSystem([TestDynamics.DoubleIntegrator(ΔT) for _ in 1:n_players])
 
 @unpack n_states, n_controls = control_system
-n_players = length(control_system.subsystems)
 n_states_per_player = Int(n_states / n_players)
 
 # Setup solver
@@ -59,24 +68,22 @@ set_solver_attributes!(opt_model; solver_attributes...)
 JuMP.set_time_limit_sec(opt_model, 80.0)
 
 # Load observation data
-# data_states   = Matrix(CSV.read("data/KKT_trajectory_state.csv", DataFrame, header = false))
-# data_controls = Matrix(CSV.read("data/KKT_trajectory_control.csv", DataFrame, header = false))
-data_states   = Matrix(CSV.read("data/fwd_unicycles_state.csv", DataFrame, header = false))
-data_controls = Matrix(CSV.read("data/fwd_unicycles_control.csv", DataFrame, header = false))
+data_states_full   = Matrix(CSV.read("data/f_di_s.csv", DataFrame, header = false))
+data_controls_full = Matrix(CSV.read("data/f_di_c.csv", DataFrame, header = false))
+data_states   = data_states_full[:,1:T_trim]
+data_controls = data_controls_full[:,1:T_trim]
 
 # Compute values from data
 T             = size(data_states,2)
 x0            = data_states[:,1]
-player_angles = data_states[4:n_states_per_player:n_states,1]
+as            = data_states[n_states_per_player:n_states_per_player:n_states,1]
 
 # ---- USER INPUT: Setup unknown parameters ----
 
 # Constraint parameters 
-n_couples = 6
-
-uk_ωs = @variable(opt_model, [1:n_couples], lower_bound = -0.1, upper_bound = 0.1)
-uk_αs = @variable(opt_model, [1:n_couples], lower_bound = -pi, upper_bound = pi)
-uk_ρs = @variable(opt_model, [1:n_couples], lower_bound = 0.1, upper_bound = 1)
+uk_ωs = @variable(opt_model, [1:n_couples], lower_bound = -0.7, upper_bound = 0.7)
+uk_αs = @variable(opt_model, [1:n_couples], lower_bound = -pi,  upper_bound = pi)
+uk_ρs = @variable(opt_model, [1:n_couples], lower_bound = 0.05, upper_bound = 10)
 
 # 3p
 # ωs = [0.0 uk_ωs[1] uk_ωs[2];
@@ -114,18 +121,42 @@ adj_mat = [false true  true  true;
 constraint_params = (; adj_mat, ωs, αs, ρs)
 
 # Cost parameters
-uk_weights = @variable(opt_model, [1:3], lower_bound = 0.0)
-@constraint(opt_model, sum(uk_weights) == 1) #regularization 
+uk_weights = @variable(opt_model, [1:n_players, 1:4], lower_bound = 0.0)
+@constraint(opt_model, [p = 1:n_players], sum(uk_weights[p,:]) == 1) #regularization 
 
-player_cost_models = map(enumerate(player_angles)) do (ii, player_angle)
-    cost_model_p1 = CollisionAvoidanceGame.generate_player_cost_model_simple(;
+# Costs
+player_cost_models = map(enumerate(as)) do (ii, a)
+    cost_model_p1 = CollisionAvoidanceGame.generate_integrator_cost(;
         player_idx = ii,
         control_system,
         T,
-        goal_position = unitvector(player_angle),
-        weights = (; control_Δv = uk_weights[1], control_Δθ = uk_weights[2], state_goal = uk_weights[3])
+        goal_position = scale*unitvector(a),
+        weights = (; 
+            state_proximity = uk_weights[ii,1],
+            state_goal      = uk_weights[ii,2],
+            control_Δvx     = uk_weights[ii,3], 
+            control_Δvy     = uk_weights[ii,4]),
+        T_activate_goalcost,
+        prox_min_regularization = 0.1
     )
 end
+
+# # Costs
+# player_cost_models = map(enumerate(as)) do (ii, a)
+#     cost_model_p1 = CollisionAvoidanceGame.generate_integrator_cost(;
+#         player_idx = ii,
+#         control_system,
+#         T,
+#         goal_position = scale*unitvector(a),
+#         weights = (; 
+#             state_proximity = 0.05, 
+#             state_goal = 1,
+#             control_Δvx = 1, 
+#             control_Δvy = 1),
+#         T_activate_goalcost,
+#         prox_min_regularization = 0.1
+#     )
+# end
 
 # ---- Setup decision variables ----
 
@@ -190,6 +221,7 @@ time = @elapsed JuMP.optimize!(opt_model)
 @info time
 
 solution = merge((;x,u), get_values(;uk_ωs, uk_αs, uk_ρs, uk_weights))
+# solution = merge((;x,u), get_values(;uk_ωs, uk_αs, uk_ρs))
 
 # 3p 
 # k_ωs = [0.0 solution.uk_ωs[1] solution.uk_ωs[2];
@@ -218,5 +250,6 @@ k_ρs = [0.0 solution.uk_ρs[1] solution.uk_ρs[2] solution.uk_ρs[4];
 
 visualize_rotating_hyperplanes(
     solution.x,
-    (; adj_mat, ωs = k_ωs, αs = k_αs, ρs = k_ρs, title = "Inverse", n_players, n_states_per_player),
+    (; adj_mat, ωs = k_ωs, αs = k_αs, ρs = k_ρs, title = "Inverse", n_players, n_states_per_player);
+    koz = true, fps = 2.5
 )

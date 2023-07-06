@@ -18,14 +18,15 @@ using CSV, DataFrames
 include("utils/misc.jl")
 
 # ---- Setup ---- 
-T = 50
+
 T_activate_goalcost = 1
 ΔT = 0.1
 n_players = 4
-v_init = 3
-os = deg2rad(90) # init. angle offset
-scale = 10.0
+scale = 1
 
+T = 30
+v_init = 0.4
+os = deg2rad(90) # init. angle offset
 max_wall_time = 60.0
 
 # Setup system
@@ -48,10 +49,10 @@ player_cost_models = map(enumerate(as)) do (ii, a)
         T,
         goal_position = scale*unitvector(a),
         weights = (; 
-            state_proximity = 1, 
+            state_proximity = 0.05, 
             state_goal = 1,
-            control_Δvx = 10, 
-            control_Δvy = 10),
+            control_Δvx = 1, 
+            control_Δvy = 1),
         T_activate_goalcost,
         prox_min_regularization = 0.1
     )
