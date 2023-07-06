@@ -263,7 +263,7 @@ function animate_trajectory(states, params)
             [states[pos_idx[player, 1], 1:i] for player in 1:(params.n_players)],
             [states[pos_idx[player, 2], 1:i] for player in 1:(params.n_players)],
             legend = false,
-            title = params.title,
+            title = params.title * "\nt = $i/$T",
             xlabel = "x",
             ylabel = "y",
             size = (500, 500),
