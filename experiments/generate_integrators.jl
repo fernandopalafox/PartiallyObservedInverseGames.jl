@@ -18,9 +18,9 @@ using CSV, DataFrames
 include("utils/misc.jl")
 
 # ---- Setup ---- 
-T = 30
-T_activate_goalcost = Int(round(T/10))
-ΔT = 0.05
+T = 75
+T_activate_goalcost = Int(round(T/3))
+ΔT = 0.25
 n_players = 4
 v_init = 0.3
 offset = 90
@@ -46,11 +46,12 @@ player_cost_models = map(enumerate(as)) do (ii, a)
         T,
         goal_position = scale*unitvector(a),
         weights = (; 
-            state_proximity = 1000, 
-            state_goal = 100,
+            state_proximity = 1, 
+            state_goal = 1,
             control_Δvx = 1, 
             control_Δvy = 1),
         T_activate_goalcost,
+        prox_min_regularization = 0.1
     )
 end
 
