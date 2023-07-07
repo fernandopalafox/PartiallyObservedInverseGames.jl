@@ -14,6 +14,7 @@ using PartiallyObservedInverseGames.TrajectoryVisualization:
     TrajectoryVisualization, animate_trajectory
 using CollisionAvoidanceGame: CollisionAvoidanceGame
 using CSV, DataFrames
+using Ipopt
 
 include("utils/misc.jl")
 
