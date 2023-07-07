@@ -73,6 +73,7 @@ function DynamicsModelInterface.add_shared_constraint!(system::DoubleIntegrator,
 
     # Known parameters
     T = size(x, 2)
+    T_offset = params.T_offset
     couple = params.couple
     ρ = params.ρs[couple]
     α = params.αs[couple]
@@ -86,8 +87,8 @@ function DynamicsModelInterface.add_shared_constraint!(system::DoubleIntegrator,
     # Note indexing using (t-1) 
     n_cos = @variable(opt_model, [1:T])
     n_sin = @variable(opt_model, [1:T])
-    @NLconstraint(opt_model, [t = 1:T], n_cos[t] == cos(α + ω * (t-1)))
-    @NLconstraint(opt_model, [t = 1:T], n_sin[t] == sin(α + ω * (t-1)))
+    @NLconstraint(opt_model, [t = 1:T], n_sin[t] == sin(α + ω * (t - 1 + T_offset)))
+    @NLconstraint(opt_model, [t = 1:T], n_cos[t] == cos(α + ω * (t - 1 + T_offset)))
     function n(t)
         [n_cos[t],n_sin[t]]
     end
@@ -116,6 +117,7 @@ function DynamicsModelInterface.add_shared_jacobian!(system::DoubleIntegrator, o
 
     # Known parameters
     n_states_all, T = size(x)
+    T_offset = params.T_offset
     n_states = system.n_states
     n_players = Int(n_states_all/n_states)
     couple = params.couple
@@ -131,8 +133,8 @@ function DynamicsModelInterface.add_shared_jacobian!(system::DoubleIntegrator, o
     # Gradients of hyperplane constraints with respect to x
     n_cos = @variable(opt_model, [2:T])
     n_sin = @variable(opt_model, [2:T])
-    @NLconstraint(opt_model, [t = 2:T], n_cos[t] == cos(α + ω * (t-1)))
-    @NLconstraint(opt_model, [t = 2:T], n_sin[t] == sin(α + ω * (t-1)))
+    @NLconstraint(opt_model, [t = 2:T], n_cos[t] == cos(α + ω * (t - 1 + T_offset)))
+    @NLconstraint(opt_model, [t = 2:T], n_sin[t] == sin(α + ω * (t - 1 + T_offset)))
 
     dhdx = @variable(opt_model, [[1], 1:n_states_all, 1:T])
 
