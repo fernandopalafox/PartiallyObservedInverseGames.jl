@@ -319,7 +319,7 @@ function generate_integrator_cost(;
         (; dx = dJdx, du = dJdu)
     end
 
-    (; player_inputs = input_indices, weights, add_objective!, add_objective_gradients!)
+    (; player_inputs = input_indices, weights, add_objective!, add_objective_gradients!, goal_position)
 end
 
 function generate_player_cost_model_simple(;
