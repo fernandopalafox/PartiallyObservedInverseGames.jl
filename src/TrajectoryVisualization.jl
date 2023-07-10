@@ -273,9 +273,9 @@ function visualize_obs_pred(states, T_obs, params; koz = true, fps = 5)
     anim = @animate for i = 1:T
 
         if i <= T_obs
-            title = "$(params.title)\n t = $i/$T\nmode: observing"
+            title = "$(params.title)\n t = " *string(round(i*params.ΔT; digits = 2)) * "/" * string(round(params.ΔT*T; digits = 2)) * "s" *"\nmode: observing"
         else
-            title = "$(params.title)\n t = $i/$T\nmode: predicting"
+            title = "$(params.title)\n t = " *string(round(i*params.ΔT; digits = 2)) * "/" * string(round(params.ΔT*T; digits = 2)) * "s" *"\nmode: predicting"
         end
 
         # Plot trajectories
@@ -362,7 +362,7 @@ function visualize_obs_pred(states, T_obs, params; koz = true, fps = 5)
     gif(anim, fps = fps, "obs_pred_"*params.title*".gif")
 end    
 
-function animate_trajectory(states, params)
+function animate_trajectory(states, params; fps = 5)
     pos_idx = vcat(
         [[1 2] .+ (player - 1) * params.n_states_per_player for player in 1:(params.n_players)]...,
     )
@@ -383,7 +383,7 @@ function animate_trajectory(states, params)
             [states[pos_idx[player, 1], 1:i] for player in 1:(params.n_players)],
             [states[pos_idx[player, 2], 1:i] for player in 1:(params.n_players)],
             legend = false,
-            title = params.title * "\nt = $i/$T",
+            title = params.title * "\nt = " *string(round(i*params.ΔT; digits = 2)) * "/" * string(params.ΔT*T) * "s",
             xlabel = "x",
             ylabel = "y",
             size = (500, 500),
@@ -399,7 +399,7 @@ function animate_trajectory(states, params)
         # Set domain
         plot!(xlims = domain, ylims = domain)
     end
-    gif(anim, fps = 5, params.title * ".gif")
+    gif(anim, fps = fps, params.title * ".gif")
 end
 
 end
