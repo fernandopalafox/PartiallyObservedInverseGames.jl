@@ -197,7 +197,12 @@ function generate_integrator_cost(;
     control_system::TestDynamics.ProductSystem,
     T,
     goal_position,
-    weights = (; state_proximity = 1, state_velocity = 1, control_Δvx = 1, control_Δvy = 1),
+    weights = (; state_proximity = 1, state_velocity = 1, control_Δv = 1),
+    cost_prescaling = (;
+        state_proximity = 0.1,
+        state_goal = 1,
+        control_Δv = 10,
+    ),
     prox_min_regularization = 0.1,
     T_activate_goalcost = T,
 )
@@ -241,13 +246,12 @@ function generate_integrator_cost(;
                 end
                 sum(prox_cost)
             end,
-            control_Δvx = sum(el -> el^2, u_sub_ego[1, :]),
-            control_Δvy = sum(el -> el^2, u_sub_ego[2, :]),
+            control_Δv = sum(el -> el^2, u_sub_ego[1:2, :]),
         )
         @objective(
             opt_model,
             Min,
-            sum(weights[k] * J̃[k] for k in keys(weights))
+            sum(weights[k] * cost_prescaling[k] * J̃[k] for k in keys(weights))
         )
     end
 
@@ -291,12 +295,11 @@ function generate_integrator_cost(;
             dJ̃dx_sub = (;
                 state_goal = [dgoal_dxy; zeros(2, T)],
                 state_proximity = [dprox_dxy; zeros(2, T)],
-                control_Δvx = zeros(size(x_sub_ego)),
-                control_Δvy = zeros(size(x_sub_ego)),
+                control_Δv = zeros(size(x_sub_ego))
             )
             dJdx_sub =
                 sum(
-                    weights[k] * dJ̃dx_sub[symbol(k)]
+                    weights[k] * cost_prescaling[symbol(k)] * dJ̃dx_sub[symbol(k)]
                     for k in keys(weights)
                 )
             [
@@ -308,7 +311,9 @@ function generate_integrator_cost(;
 
         dJdu = let
             dJdu_sub =
-                2 * [weights[:control_Δvx], weights[:control_Δvy]] .* u_sub_ego
+                2 * [weights[:control_Δv], weights[:control_Δv]] .* 
+                [cost_prescaling[:control_Δv], cost_prescaling[:control_Δv]] .* 
+                u_sub_ego
             [
                 zeros(first(input_indices) - 1, T)
                 dJdu_sub

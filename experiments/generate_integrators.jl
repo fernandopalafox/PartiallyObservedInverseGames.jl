@@ -22,11 +22,11 @@ include("utils/misc.jl")
 
 let 
 
-T_activate_goalcost = 1
 ΔT = 0.1
 n_players = 4
 scale = 1
-t_real = 4.0
+t_real = 5.0
+T_activate_goalcost = 1
 
 v_init = 0.5
 os = deg2rad(90) # init. angle offset
@@ -45,6 +45,12 @@ x0 = vcat(
 )
 
 # Costs
+weights = [0.05  0.9 0.05;
+           0.05  0.05 0.9;
+           0.9  0.05 0.05;
+           0.33  0.33 0.33];
+           
+
 T = Int(t_real / ΔT)
 player_cost_models = map(enumerate(as)) do (ii, a)
     cost_model_p1 = CollisionAvoidanceGame.generate_integrator_cost(;
@@ -53,10 +59,9 @@ player_cost_models = map(enumerate(as)) do (ii, a)
         T,
         goal_position = scale*unitvector(a),
         weights = (; 
-            state_proximity = 0.05, 
-            state_goal = 1,
-            control_Δvx = 20, 
-            control_Δvy = 20),
+            state_proximity = weights[ii, 1], 
+            state_goal      = weights[ii, 2],
+            control_Δv      = weights[ii, 3]),
         T_activate_goalcost,
         prox_min_regularization = 0.1
     )
