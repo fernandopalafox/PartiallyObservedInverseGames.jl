@@ -68,16 +68,16 @@ function DynamicsModelInterface.add_dynamics_jacobians!(system::DoubleIntegrator
     (; dx = dfdx, du = dfdu)
 end
 
-function DynamicsModelInterface.add_shared_constraint!(system::DoubleIntegrator, opt_model, x, u, params; set = true)
+function DynamicsModelInterface.add_shared_constraint!(system::DoubleIntegrator, opt_model, x, u, parameters; set = true)
     # Note: this is getting fed the FULL state vector, not just the player 1 state vector
 
     # Known parameters
     T = size(x, 2)
-    T_offset = params.T_offset
-    couple = params.couple
-    ρ = params.ρs[couple]
-    α = params.αs[couple]
-    ω = params.ωs[couple]
+    T_offset = parameters.T_offset
+    couple = parameters.couple
+    ω = parameters.ω
+    α = parameters.α
+    ρ = parameters.ρ
 
     # Player indices 
     idx_ego   = (1:2) .+ (couple[1] - 1)*system.n_states
@@ -112,18 +112,18 @@ function DynamicsModelInterface.add_shared_constraint!(system::DoubleIntegrator,
     return h
 end 
 
-function DynamicsModelInterface.add_shared_jacobian!(system::DoubleIntegrator, opt_model, x, u, params)
+function DynamicsModelInterface.add_shared_jacobian!(system::DoubleIntegrator, opt_model, x, u, parameters)
     # Note: this is getting fed the FULL state vector, not just the player 1 state vector
 
     # Known parameters
     n_states_all, T = size(x)
-    T_offset = params.T_offset
+    T_offset = parameters.T_offset
     n_states = system.n_states
     n_players = Int(n_states_all/n_states)
-    couple = params.couple
-    ρ = params.ρs[couple]
-    α = params.αs[couple]
-    ω = params.ωs[couple]
+    couple = parameters.couple
+    ω = parameters.ω
+    α = parameters.α
+    ρ = parameters.ρ
 
     # Player indices 
     idx_ego   = (1:2) .+ (couple[1] - 1)*system.n_states
