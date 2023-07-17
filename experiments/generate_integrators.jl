@@ -23,7 +23,7 @@ include("utils/misc.jl")
 let 
 
 ΔT = 0.1
-n_players = 4
+n_players = 2
 scale = 1
 t_real = 5.0
 T_activate_goalcost = 1
@@ -49,6 +49,12 @@ weights = [0.05  0.9 0.05;
            0.05  0.05 0.9;
            0.9  0.05 0.05;
            0.33  0.33 0.33];
+weights = [0.05  0.05 0.9;
+           0.05  0.05 0.9;
+           0.05  0.05 0.9];
+weights = [0.05  0.05 0.9;
+           0.05  0.05 0.9]
+           
            
 
 T = Int(t_real / ΔT)

@@ -22,7 +22,7 @@ include("utils/misc.jl")
 solution = let 
 
     ΔT = 0.1
-    n_players = 4
+    n_players = 3
     scale = 1
     t_real = 5.0
     T_activate_goalcost = 1
