@@ -172,7 +172,7 @@ function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5)
     pos_idx = vcat(
         [[1 2] .+ (player - 1) * params.n_states_per_player for player in 1:(params.n_players)]...,
     )
-    couples = findall(params.adj_mat)
+    couples = findall(params.adjacency_matrix)
     colors = palette(:default)[1:(params.n_players)]
     T = size(states,2)
 
@@ -207,12 +207,12 @@ function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5)
 
         # Plot KoZs
         
-        for couple in couples
+        for (couple_idx, couple)  in enumerate(couples)
             if koz
                 # Plot KoZ around hyperplane owner
                 plot!(
-                    [states[pos_idx[couple[2], 1], i] + params.ρs[couple[1], couple[2]] * cos(θ) for θ in range(0,stop=2π,length=100)], 
-                    [states[pos_idx[couple[2], 2], i] + params.ρs[couple[1], couple[2]] * sin(θ) for θ in range(0,stop=2π,length=100)], 
+                    [states[pos_idx[couple[2], 1], i] + params.ρs[couple_idx] * cos(θ) for θ in range(0,stop=2π,length=100)], 
+                    [states[pos_idx[couple[2], 2], i] + params.ρs[couple_idx] * sin(θ) for θ in range(0,stop=2π,length=100)], 
                     color = colors[couple[1]], 
                     legend = false,
                     fillalpha = 0.1,
@@ -221,8 +221,8 @@ function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5)
             end
             # Plot hyperplane normal
             ni =
-                params.ρs[couple[1], couple[2]] *
-                n(i, params.αs[couple[1], couple[2]], params.ωs[couple[1], couple[2]])
+                params.ρs[couple_idx] *
+                n(i, params.αs[couple_idx], params.ωs[couple_idx])
             plot!(
                 [states[pos_idx[couple[2], 1], i], states[pos_idx[couple[2], 1], i] + ni[1]],
                 [states[pos_idx[couple[2], 2], i], states[pos_idx[couple[2], 2], i] + ni[2]],
