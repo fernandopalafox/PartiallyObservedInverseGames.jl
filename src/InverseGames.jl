@@ -9,7 +9,7 @@ using ..InverseOptimalControl: InverseOptimalControl
 using ..InversePreSolve: InversePreSolve
 using ..ForwardGame: ForwardGame
 
-using JuMP: @variable, @constraint, @objective
+using JuMP: @variable, @constraint, @objective, @NLconstraint
 using UnPack: @unpack
 
 export InverseKKTConstraintSolver, InverseKKTResidualSolver, solve_inverse_game
@@ -391,6 +391,195 @@ function solve_inverse_game(
     )
 
     JuMPUtils.isconverged(opt_model), solution, opt_model
+end
+
+struct InverseHyperplaneSolver end
+
+function solve_inverse_game(
+    ::InverseHyperplaneSolver,
+    y, 
+    adjacency_matrix;
+    control_system,
+    player_cost_models,
+    init = (),
+    solver = Ipopt.Optimizer,
+    solver_attributes = (; max_wall_time = 20.0, print_level = 5),
+    cmin = 1e-5,
+    ρmin = 0.1,
+    μ = 10.0,
+    verbose = false,
+)
+
+    # ---- Initial settings ---- 
+    ΔT = control_system.subsystems[1].ΔT
+    n_players = length(control_system.subsystems)
+    n_couples = length(findall(adjacency_matrix))
+
+    # ---- Setup solver ---- 
+
+    # Solver
+    opt_model = JuMP.Model(solver)
+    JuMPUtils.set_solver_attributes!(opt_model; solver_attributes...)
+
+    # Useful values
+    @unpack n_states, n_controls = control_system
+    T  = size(y.x, 2)
+
+    # Setup unknown constraint parameters
+    ωs = @variable(opt_model, [1:n_couples], lower_bound = -0.7, upper_bound = 0.7)
+    αs = @variable(opt_model, [1:n_couples], lower_bound = -pi,  upper_bound = pi)
+    ρs = @variable(opt_model, [1:n_couples], lower_bound = ρmin, upper_bound = 1.0)
+    constraint_parameters = (; adjacency_matrix, ωs, αs, ρs)
+
+    # Other decision variables
+    if !isnothing(constraint_parameters.adjacency_matrix)
+        couples = findall(constraint_parameters.adjacency_matrix)
+        player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
+
+        λ_i = @variable(opt_model, [1:length(couples), 1:T])
+        s   = @variable(opt_model, [1:length(couples), 1:T], lower_bound = 0.0, start = 1.5) 
+
+        JuMPUtils.init_if_hasproperty!(λ_i, init, :λ_i)
+        JuMPUtils.init_if_hasproperty!(s, init, :s)
+    end
+    player_weights =
+                [@variable(opt_model, [keys(cost_model.weights)]) for cost_model in player_cost_models]
+    x   = @variable(opt_model, [1:n_states, 1:T])
+    u   = @variable(opt_model, [1:n_controls, 1:T])
+    λ_e = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
+
+    # Warmstart
+    JuMPUtils.init_if_hasproperty!(x, init, :x)
+    JuMPUtils.init_if_hasproperty!(u, init, :u)
+    JuMPUtils.init_if_hasproperty!(λ_e, init,:λ_e)
+    JuMPUtils.init_if_hasproperty!(s, init, :s)
+    JuMPUtils.init_if_hasproperty!(λ_i, init,:λ_i)
+
+    # ---- Setup constraints ----
+
+    # Dynamics constraints
+    @constraint(opt_model, x[:, 1] .== y.x[:,1])
+    DynamicsModelInterface.add_dynamics_constraints!(control_system, opt_model, x, u)
+    df = DynamicsModelInterface.add_dynamics_jacobians!(control_system, opt_model, x, u)
+
+    # KKT conditions
+    for (player_idx, cost_model) in enumerate(player_cost_models)
+        weights = player_weights[player_idx]
+        @unpack player_inputs = cost_model
+        dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
+
+        # Adjacency matrix denotes shared inequality constraint
+        if !isnothing(constraint_parameters.adjacency_matrix) && 
+        !isempty(player_couples[player_idx])
+
+            # Extract relevant lms and slacks
+            λ_i_couple = λ_i[player_couples[player_idx], :]
+            s_couple = s[player_couples[player_idx], :]
+            dhdx_container = []
+
+            for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
+                parameters = (; couple, ω = ωs[couple_idx], α = αs[couple_idx], ρ = ρs[couple_idx], T_offset = 0)
+                # Extract shared constraint for player couple 
+                hs = DynamicsModelInterface.add_shared_constraint!(
+                    control_system.subsystems[player_idx],
+                    opt_model,
+                    x,
+                    u,
+                    parameters;
+                    set = false,
+                )
+                # Extract shared constraint Jacobian 
+                dhs = DynamicsModelInterface.add_shared_jacobian!(
+                    control_system.subsystems[player_idx],
+                    opt_model,
+                    x,
+                    u,
+                    parameters,
+                )
+                # Stack shared constraint Jacobian. 
+                # One row per couple, timestep indexing along 3rd axis
+                append!(dhdx_container, [dhs.dx])
+                # Feasibility of barrier-ed constraints
+                @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx, t] == 0.0)
+            end
+            dhdx = vcat(dhdx_container...)
+
+            # Gradient of the Lagrangian wrt x is zero 
+            @constraint(
+                opt_model,
+                [t = 2:(T - 1)],
+                dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' -
+                λ_e[:, t, player_idx]' * df.dx[:, :, t] + λ_i_couple[:, t]' * dhdx[:, :, t] .== 0
+            )
+            @constraint(
+                opt_model,
+                dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' + λ_i_couple[:, T]' * dhdx[:, :, T] .== 0
+            ) 
+
+            # Gradient of the Lagrangian wrt player's own inputs is zero
+            @constraint(
+                opt_model,
+                [t = 1:(T - 1)],
+                dJ.du[player_inputs, t]' - λ_e[:, t, player_idx]' * df.du[:, player_inputs, t] .==
+                0
+            )
+            @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
+
+            # Gradient of the Lagrangian wrt s is zero
+            n_s_couple = length(s_couple)
+            λ_i_couple_reshaped = reshape(λ_i_couple', (1, :))
+            s_couple_reshaped = reshape(s_couple', (1, :))
+            s_couple_inv = @variable(opt_model, [2:n_s_couple])
+            @NLconstraint(opt_model, [t = 2:n_s_couple], s_couple_inv[t] == 1 / s_couple_reshaped[t])
+            @constraint(opt_model, [t = 2:n_s_couple], -μ * s_couple_inv[t] - λ_i_couple_reshaped[t] == 0)
+
+        else
+            # Gradient of the Lagrangian wrt x is zero 
+            @constraint(
+                opt_model,
+                [t = 2:(T - 1)],
+                dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' -
+                λ_e[:, t, player_idx]' * df.dx[:, :, t] .== 0
+            )
+            @constraint(
+                opt_model,
+                dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' .== 0
+            ) 
+
+            # Gradient of the Lagrangian wrt u is zero
+            @constraint(
+                opt_model,
+                [t = 1:(T - 1)],
+                dJ.du[player_inputs, t]' - λ_e[:, t, player_idx]' * df.du[:, player_inputs, t] .==
+                0
+            )
+            @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
+        end
+    
+    end
+
+    # weight regularization
+    for weights in player_weights
+        @constraint(opt_model, weights .>= cmin)
+        @constraint(opt_model, sum(weights) .== 1)
+    end
+
+    # objective
+    @objective(
+        opt_model,
+        Min,
+        sum(el -> el^2, x .- y.x)
+    )
+
+    # Solve problem 
+    time = @elapsed JuMP.optimize!(opt_model)
+    @info time
+
+
+    merge(
+        JuMPUtils.get_values(; x, u, ωs, αs, ρs),
+        (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights))
+    )
 end
 
 end
