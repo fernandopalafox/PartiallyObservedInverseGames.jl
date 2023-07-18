@@ -12,7 +12,7 @@ using ..ForwardGame: ForwardGame
 using JuMP: @variable, @constraint, @objective, @NLconstraint
 using UnPack: @unpack
 
-export InverseKKTConstraintSolver, InverseKKTResidualSolver, solve_inverse_game
+export InverseKKTConstraintSolver, InverseKKTResidualSolver, solve_inverse_game, InverseHyperplaneSolver, InverseWeightSolver
 
 #================================ Inverse Games via KKT constraints ================================#
 
@@ -407,11 +407,9 @@ function solve_inverse_game(
     cmin = 1e-5,
     ρmin = 0.1,
     μ = 10.0,
-    verbose = false,
 )
 
     # ---- Initial settings ---- 
-    ΔT = control_system.subsystems[1].ΔT
     n_players = length(control_system.subsystems)
     n_couples = length(findall(adjacency_matrix))
 
@@ -428,7 +426,7 @@ function solve_inverse_game(
     # Setup unknown constraint parameters
     ωs = @variable(opt_model, [1:n_couples], lower_bound = -0.7, upper_bound = 0.7)
     αs = @variable(opt_model, [1:n_couples], lower_bound = -pi,  upper_bound = pi)
-    ρs = @variable(opt_model, [1:n_couples], lower_bound = ρmin, upper_bound = 1.0)
+    ρs = @variable(opt_model, [1:n_couples], lower_bound = ρmin, upper_bound = 10.0)
     constraint_parameters = (; adjacency_matrix, ωs, αs, ρs)
 
     # Other decision variables
@@ -437,10 +435,7 @@ function solve_inverse_game(
         player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
 
         λ_i = @variable(opt_model, [1:length(couples), 1:T])
-        s   = @variable(opt_model, [1:length(couples), 1:T], lower_bound = 0.0, start = 1.5) 
-
-        JuMPUtils.init_if_hasproperty!(λ_i, init, :λ_i)
-        JuMPUtils.init_if_hasproperty!(s, init, :s)
+        s   = @variable(opt_model, [1:length(couples), 1:T], lower_bound = 0.0) 
     end
     player_weights =
                 [@variable(opt_model, [keys(cost_model.weights)]) for cost_model in player_cost_models]
@@ -454,6 +449,16 @@ function solve_inverse_game(
     JuMPUtils.init_if_hasproperty!(λ_e, init,:λ_e)
     JuMPUtils.init_if_hasproperty!(s, init, :s)
     JuMPUtils.init_if_hasproperty!(λ_i, init,:λ_i)
+    JuMPUtils.init_if_hasproperty!(ωs, init,:ωs)
+    JuMPUtils.init_if_hasproperty!(αs, init,:αs)
+    JuMPUtils.init_if_hasproperty!(ρs, init,:ρs)
+    if hasproperty(init, :player_weights) && !isnothing(init.player_weights)
+        for (ii, weights) in pairs(init.player_weights)
+            for k in keys(weights)
+                JuMP.set_start_value(player_weights[ii][k], weights[k])
+            end
+        end
+    end
 
     # ---- Setup constraints ----
 
@@ -478,7 +483,8 @@ function solve_inverse_game(
             dhdx_container = []
 
             for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
-                parameters = (; couple, ω = ωs[couple_idx], α = αs[couple_idx], ρ = ρs[couple_idx], T_offset = 0)
+                parameter_idx = player_couples[player_idx][couple_idx]
+                parameters = (; couple, ω = ωs[parameter_idx], α = αs[parameter_idx], ρ = ρs[parameter_idx], T_offset = 0)
                 # Extract shared constraint for player couple 
                 hs = DynamicsModelInterface.add_shared_constraint!(
                     control_system.subsystems[player_idx],
@@ -574,12 +580,115 @@ function solve_inverse_game(
     # Solve problem 
     time = @elapsed JuMP.optimize!(opt_model)
     @info time
-
-
-    merge(
-        JuMPUtils.get_values(; x, u, ωs, αs, ρs),
+    solution = merge(
+        JuMPUtils.get_values(; x, u, λ_i, λ_e, s, ωs, αs, ρs),
         (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights))
     )
+    (JuMPUtils.isconverged(opt_model), solution)
+end
+
+struct InverseWeightSolver end
+
+function solve_inverse_game(
+    ::InverseWeightSolver,
+    y;
+    control_system,
+    player_cost_models,
+    init = (),
+    solver = Ipopt.Optimizer,
+    solver_attributes = (; max_wall_time = 20.0, print_level = 5),
+    cmin = 1e-5,
+)
+
+    # ---- Initial settings ---- 
+    n_players = length(control_system.subsystems)
+
+    # ---- Setup solver ---- 
+
+    # Solver
+    opt_model = JuMP.Model(solver)
+    JuMPUtils.set_solver_attributes!(opt_model; solver_attributes...)
+
+    # Useful values
+    @unpack n_states, n_controls = control_system
+    T  = size(y.x, 2)
+
+    # Other decision variables
+    player_weights =
+                [@variable(opt_model, [keys(cost_model.weights)]) for cost_model in player_cost_models]
+    x   = @variable(opt_model, [1:n_states, 1:T])
+    u   = @variable(opt_model, [1:n_controls, 1:T])
+    λ_e = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
+
+    # Warmstart
+    JuMPUtils.init_if_hasproperty!(x, init, :x)
+    JuMPUtils.init_if_hasproperty!(u, init, :u)
+    JuMPUtils.init_if_hasproperty!(λ_e, init,:λ_e)
+    if hasproperty(init, :player_weights) && !isnothing(init.player_weights)
+        for (ii, weights) in pairs(init.player_weights)
+            for k in keys(weights)
+                JuMP.set_start_value(player_weights[ii][k], weights[k])
+            end
+        end
+    end
+
+    # ---- Setup constraints ----
+
+    # Dynamics constraints
+    @constraint(opt_model, x[:, 1] .== y.x[:,1])
+    DynamicsModelInterface.add_dynamics_constraints!(control_system, opt_model, x, u)
+    df = DynamicsModelInterface.add_dynamics_jacobians!(control_system, opt_model, x, u)
+
+    # KKT conditions
+    for (player_idx, cost_model) in enumerate(player_cost_models)
+        weights = player_weights[player_idx]
+        @unpack player_inputs = cost_model
+        dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
+
+        # Gradient of the Lagrangian wrt x is zero 
+        @constraint(
+            opt_model,
+            [t = 2:(T - 1)],
+            dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' -
+            λ_e[:, t, player_idx]' * df.dx[:, :, t] .== 0
+        )
+        @constraint(
+            opt_model,
+            dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' .== 0
+        ) 
+
+        # Gradient of the Lagrangian wrt u is zero
+        @constraint(
+            opt_model,
+            [t = 1:(T - 1)],
+            dJ.du[player_inputs, t]' - λ_e[:, t, player_idx]' * df.du[:, player_inputs, t] .==
+            0
+        )
+        @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
+    
+    end
+
+    # weight regularization
+    for weights in player_weights
+        @constraint(opt_model, weights .>= cmin)
+        @constraint(opt_model, sum(weights) .== 1)
+    end
+
+    # objective
+    @objective(
+        opt_model,
+        Min,
+        sum(el -> el^2, x .- y.x)
+    )
+
+    # Solve problem 
+    time = @elapsed JuMP.optimize!(opt_model)
+    @info time
+    solution = merge(
+        JuMPUtils.get_values(; x, u, λ_e),
+        (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights))
+    )
+    (JuMPUtils.isconverged(opt_model), solution)
 end
 
 end
