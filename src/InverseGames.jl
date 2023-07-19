@@ -424,9 +424,9 @@ function solve_inverse_game(
     T  = size(y.x, 2)
 
     # Setup unknown constraint parameters
-    ωs = @variable(opt_model, [1:n_couples], lower_bound = -0.7, upper_bound = 0.7)
+    ωs = @variable(opt_model, [1:n_couples], lower_bound = -0.3, upper_bound = 0.3)
     αs = @variable(opt_model, [1:n_couples], lower_bound = -pi,  upper_bound = pi)
-    ρs = @variable(opt_model, [1:n_couples], lower_bound = ρmin, upper_bound = 10.0)
+    ρs = @variable(opt_model, [1:n_couples], lower_bound = ρmin)
     constraint_parameters = (; adjacency_matrix, ωs, αs, ρs)
 
     # Other decision variables
@@ -459,6 +459,13 @@ function solve_inverse_game(
             end
         end
     end
+
+    # Fix player weights
+    # for (ii, weights) in pairs(init.player_weights)
+    #     for k in keys(weights)
+    #         JuMP.fix(player_weights[ii][k], weights[k])
+    #     end
+    # end
 
     # ---- Setup constraints ----
 

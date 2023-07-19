@@ -20,25 +20,26 @@ using PartiallyObservedInverseGames.InverseGames: solve_inverse_game, InverseHyp
 
 include("utils/misc.jl")
 
+function main()
 
-# User input
-ΔT = 0.1
-n_players = 4
-n_states_per_player = 4 
-scale = 1
-T_activate_goalcost = 1
-# adjacency_matrix = [false true; 
-#                     false false]
-# adjacency_matrix = [false true true;
-#                     false false true;
-#                     false false false]
-adjacency_matrix = [false true true true;
-                    false false true true;
-                    false false false true;
-                    false false false false]
-μs = [1.0*(1/10)^(i - 1) for i in 1:7]
-
-solution = let 
+    # User input
+    ΔT = 0.1
+    n_players = 4
+    n_states_per_player = 4 
+    scale = 1
+    T_activate_goalcost = 1
+    ρmin = 0.05
+    # adjacency_matrix = [false true; 
+    #                     false false]
+    # adjacency_matrix = [false true true;
+    #                     false false true;
+    #                     false false false]
+    adjacency_matrix = [false true true true;
+                        false false true true;
+                        false false false true;
+                        false false false false]
+    μs = [1.0*(1/2)^(i - 1) for i in 1:2]
+    
     # Load data 
     data_states   = Matrix(CSV.read("data/f_di_s.csv", DataFrame, header = false))
     data_inputs   = Matrix(CSV.read("data/f_di_c.csv", DataFrame, header = false))
@@ -64,45 +65,48 @@ solution = let
         )
     end
 
-    # Initial solve 
-    converged, solution = solve_inverse_game(
+    # # Initial solve 
+    (_, solution) = solve_inverse_game(
             InverseHyperplaneSolver(),
             y, 
             adjacency_matrix;
             control_system,
             player_cost_models,
-            init = (; x = data_states, u = data_inputs),
+            # init = (; player_weights = solution_weights.player_weights, x = data_states, u = data_inputs, s = 1.5),
+            init = (; x = data_states, u = data_inputs, s = 1.5),
             solver = Ipopt.Optimizer,
-            solver_attributes = (; max_wall_time = 30.0, print_level = 5),
+            solver_attributes = (; max_wall_time = 60.0, print_level = 5),
             cmin = 1e-5,
+            ρmin,
             μ = μs[1],
         )
 
     # Iterate over μs
-    solution.x = data_states
-    solution.u = data_inputs
+    # solution_warmstart = (; x = data_states, u = data_inputs, λ_e = solution.λ_e, λ_i = solution.λ_i, s = solution.s)
     solution_warmstart = solution
-    for μ in μs[1:end]
-        converged, solution = solve_inverse_game(
+    for μ in μs
+        (converged, solution) = solve_inverse_game(
             InverseHyperplaneSolver(),
-            y, 
+            y,
             adjacency_matrix;
             control_system,
             player_cost_models,
             init = solution_warmstart,
             solver = Ipopt.Optimizer,
-            solver_attributes = (; max_wall_time = 10.0, print_level = 5),
+            solver_attributes = (; max_wall_time = 20.0, print_level = 5),
             cmin = 1e-5,
+            ρmin,
             μ,
         )
-        if !converged
-            println("Did not converge for μ = $μ")
-            solution = solution_warmstart
-            break
-        end
+        # if converged
+        #     solution = solution_new
+        # else
+        #     println("Did not converge for μ = $μ")
+        #     solution = solution_warmstart
+        #     break
+        # end
         solution_warmstart = solution
         println("μ = $μ")
-        
     end
     # Plot
     visualize_rotating_hyperplanes(
@@ -110,6 +114,6 @@ solution = let
         (; adjacency_matrix, ωs = solution.ωs, αs = solution.αs, ρs = solution.ρs , title = "Inverse", n_players, n_states_per_player);
         koz = true, fps = 10.0
     )
-
     Main.@infiltrate
+
 end
