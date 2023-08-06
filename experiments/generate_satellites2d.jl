@@ -15,6 +15,7 @@ using PartiallyObservedInverseGames.TrajectoryVisualization:
 using CollisionAvoidanceGame: CollisionAvoidanceGame
 using CSV, DataFrames
 using Ipopt
+using Plots
 
 include("utils/misc.jl")
 
@@ -25,15 +26,23 @@ let
 ΔT = 0.1
 n_players = 2
 scale = 1
-t_real = 5.0
-T_activate_goalcost = 1
+t_real = 10.0
+t_real_activate_goalcost = t_real
+T_activate_goalcost = Int(t_real_activate_goalcost / ΔT)
 
-v_init = 0.5
-os = deg2rad(90) # init. angle offset
+v_init = 0.1
+os = deg2rad(45) # init. angle offset
 max_wall_time = 60.0
 
+# Satellite parameters
+m   = 100.0 # kg
+r₀ = (400 + 6378.137) # km
+μ  = 398600.4418 # km^3/s^2
+
+n = sqrt(μ/(r₀^3)) # rad/s
+
 # Setup system
-control_system = TestDynamics.ProductSystem([TestDynamics.DoubleIntegrator(ΔT) for _ in 1:n_players])
+control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m) for _ in 1:n_players])
 as = [2*pi/n_players * (i-1) for i in 1:n_players] # angles
 as = [a > pi ? a - 2*pi : a for a in as]
 
@@ -45,19 +54,8 @@ x0 = vcat(
 )
 
 # Costs
-weights = [0.05 0.9 0.05;
-           0.05 0.05 0.9;
-           0.9  0.05 0.05;
-           0.33 0.33 0.33];
-weights = [0.05 0.9 0.05;
-           0.05 0.9 0.05;
-           0.05 0.9 0.05;
-           0.05 0.9 0.05;];
-weights = [0.05 100.0 10.0;
-           0.05 100.0 10.0;
-           0.05 100.0 10.0];
-weights = [0.05 100.0 10.0;
-           0.05 100.0 10.0];       
+weights = [0.0 1.0 0.00001;
+           0.0 1.0 0.00001];       
 
 T = Int(t_real / ΔT)
 player_cost_models = map(enumerate(as)) do (ii, a)
@@ -83,19 +81,25 @@ kkt_converged, kkt_solution, kkt_model =
 
 
 # ---- Save trajectory to file ----
-CSV.write("data/f_di_s.csv", DataFrame(kkt_solution.x, :auto), header = false)
-CSV.write("data/f_di_c.csv", DataFrame(kkt_solution.u, :auto), header = false)
+CSV.write("data/f_2d_s.csv", DataFrame(kkt_solution.x, :auto), header = false)
+CSV.write("data/f_2d_c.csv", DataFrame(kkt_solution.u, :auto), header = false)
 
 # ---- Animation trajectories ----
 animate_trajectory(
         kkt_solution.x, 
         (;
             ΔT = ΔT,
-            title = "double integrators", 
+            title = "satellites 2d", 
             n_players, 
             n_states_per_player = 4
         );
         fps = 10
     )
+
+# Print maximum control effort
+println("Maximum control effort: ", maximum(abs.(kkt_solution.u)))
+
+# Plot controls
+plot(kkt_solution.u', label = ["1_ux" "1_uy" "2_ux" "2_uy"], xlabel = "t", ylabel = "u", title = "Controls")
 
 end

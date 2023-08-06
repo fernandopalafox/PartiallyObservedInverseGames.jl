@@ -1,8 +1,10 @@
-struct DoubleIntegrator{T<:Real}
+struct Satellite2D{T<:Real} 
     ΔT::T
+    n::T
+    m::T
 end
 
-function Base.getproperty(system::DoubleIntegrator, sym::Symbol)
+function Base.getproperty(system::Satellite2D, sym::Symbol)
     if sym === :n_states
         4
     elseif sym === :n_controls
@@ -12,7 +14,7 @@ function Base.getproperty(system::DoubleIntegrator, sym::Symbol)
     end
 end
 
-function DynamicsModelInterface.next_x(system::DoubleIntegrator, x_t, u_t)
+function DynamicsModelInterface.next_x(system::Satellite2D, x_t, u_t)
     ΔT = system.ΔT
     @assert only(size(x_t)) == 4
     @assert only(size(u_t)) == 2
@@ -21,56 +23,63 @@ function DynamicsModelInterface.next_x(system::DoubleIntegrator, x_t, u_t)
     [px + ΔT * vx, py + ΔT * vy, vx + ΔT * Δvx, vy + ΔT * Δvy]
 end
 
-# These constraints encode the dynamics of a DoubleIntegrator with state layout x_t = [px, py, vx, vy] and
+# These constraints encode the dynamics of a 2d with state layout x_t = [px, py, vx, vy] and
 # inputs u_t = [Δvx, Δvy].
-function DynamicsModelInterface.add_dynamics_constraints!(system::DoubleIntegrator, opt_model, x, u)
+function DynamicsModelInterface.add_dynamics_constraints!(system::Satellite2D, opt_model, x, u)
     ΔT = system.ΔT
+    n  = system.n
+    m  = system.m
     T = size(x, 2)
+
+    A_d = [ 4-3*cos(n*ΔT)      0  1/n*sin(n*ΔT)     2/n*(1-cos(n*ΔT));
+            6*(sin(n*ΔT)-n*ΔT) 1 -2/n*(1-cos(n*ΔT)) 1/n*(4*sin(n*ΔT)-3*n*ΔT);
+            3*n*sin(n*ΔT)      0  cos(n*ΔT)         2*sin(n*ΔT);
+           -6*n*(1-cos(n*ΔT))  0 -2*sin(n*ΔT)       4*cos(n*ΔT)-3];
+
+    B_d = 1/m*[ 1/n^2(1-cos(n*ΔT))     2/n^2*(n*ΔT-sin(n*ΔT));
+               -2/n^2*(n*ΔT-sin(n*ΔT)) 4/n^2*(1-cos(n*ΔT))-3/2*ΔT^2;
+                1/n*sin(n*ΔT)          2/n*(1-cos(n*ΔT));
+               -2/n*(1-cos(n*ΔT))      4/n*sin(n*ΔT)-3*ΔT]
 
     @constraint(
         opt_model,
         [t = 1:(T - 1)],
-        x[:, t + 1] .== [
-            x[1, t] + ΔT * x[3, t],
-            x[2, t] + ΔT * x[4, t],
-            x[3, t] + ΔT * u[1, t],
-            x[4, t] + ΔT * u[2, t],
-        ]
+        x[:, t + 1] .== A_d * x[:, t] + B_d * u[:, t]
     )
 end
 
-function DynamicsModelInterface.add_dynamics_jacobians!(system::DoubleIntegrator, opt_model, x, u)
+function DynamicsModelInterface.add_dynamics_jacobians!(system::Satellite2D, opt_model, x, u)
     ΔT = system.ΔT
+    n  = system.n
+    m  = system.m
     n_states, T = size(x)
     n_controls = size(u, 1)
+
+    A_d = [ 4-3*cos(n*ΔT)      0  1/n*sin(n*ΔT)     2/n*(1-cos(n*ΔT));
+            6*(sin(n*ΔT)-n*ΔT) 1 -2/n*(1-cos(n*ΔT)) 1/n*(4*sin(n*ΔT)-3*n*ΔT);
+            3*n*sin(n*ΔT)      0  cos(n*ΔT)         2*sin(n*ΔT);
+           -6*n*(1-cos(n*ΔT))  0 -2*sin(n*ΔT)       4*cos(n*ΔT)-3];
+
+    B_d = 1/m*[ 1/n^2(1-cos(n*ΔT))     2/n^2*(n*ΔT-sin(n*ΔT));
+               -2/n^2*(n*ΔT-sin(n*ΔT)) 4/n^2*(1-cos(n*ΔT))-3/2*ΔT^2;
+                1/n*sin(n*ΔT)          2/n*(1-cos(n*ΔT));
+               -2/n*(1-cos(n*ΔT))      4/n*sin(n*ΔT)-3*ΔT]
 
     # jacobians of the dynamics in x
     dfdx = @variable(opt_model, [1:n_states, 1:n_states, 1:T])
     @constraint(
         opt_model,
         [t = 1:T],
-        dfdx[:, :, t] .== [
-            1 0 ΔT 0
-            0 1 0  ΔT
-            0 0 1  0                 
-            0 0 0  1                 
-        ]
+        dfdx[:, :, t] .== A_d
     )
 
     # jacobians of the dynamics in u
-    dfdu = [
-        0  0
-        0  0
-        ΔT 0
-        0 ΔT
-    ] .* reshape(ones(T), 1, 1, :)
-
-    Main.@infiltrate
+    dfdu = B_d .* reshape(ones(T), 1, 1, :)
 
     (; dx = dfdx, du = dfdu)
 end
 
-function DynamicsModelInterface.add_shared_constraint!(system::DoubleIntegrator, opt_model, x, u, parameters; set = true)
+function DynamicsModelInterface.add_shared_constraint!(system::Satellite2D, opt_model, x, u, parameters; set = true)
     # Note: this is getting fed the FULL state vector, not just the player 1 state vector
 
     # Known parameters
@@ -116,7 +125,7 @@ function DynamicsModelInterface.add_shared_constraint!(system::DoubleIntegrator,
     return h
 end 
 
-function DynamicsModelInterface.add_shared_jacobian!(system::DoubleIntegrator, opt_model, x, u, parameters)
+function DynamicsModelInterface.add_shared_jacobian!(system::Satellite2D, opt_model, x, u, parameters)
     # Note: this is getting fed the FULL state vector, not just the player 1 state vector
 
     # Known parameters

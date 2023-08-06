@@ -9,7 +9,10 @@
 - [x] Remove extra variables (data_states, init, etc...) from inverse hyperplane solver
 - [x] Setup rho upper bound for inverse hyperplane solver
 - [x] New cost model that doesn't have obstacle avoidance
+  [x] Angle offsets should be relative to initial state. 
+- [x] Regularize all the hyperplane parameters. Will probably see more active constraints. Make weight small enough so it doesn't dominate objective. 
 - [ ] Talks that don't suck 
-- [ ] Add observation noise 
-- [ ] Better way of intializing angle offsets
-
+- [x] New initial conditions and solve forward game (with obstacle avoidance)
+- [ ] Test whether inverse solver converges in one step if I initialize it with the solution. I suspect something weird is happening here.
+- [ ] 
+  

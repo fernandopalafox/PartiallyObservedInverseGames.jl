@@ -11,5 +11,6 @@ include("unicycle.jl")
 include("hyperunicycle.jl")
 include("product_system.jl")
 include("doubleintegrator.jl")
+include("satellite2d.jl")
 
 end

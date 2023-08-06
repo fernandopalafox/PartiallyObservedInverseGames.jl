@@ -181,9 +181,25 @@ function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5)
     y_domain = extrema(states[pos_idx[:, 2], :]) .+ (-0.01, 0.01)
     domain = [minimum([x_domain[1], y_domain[1]]), maximum([x_domain[2], y_domain[2]])]    
 
+    θs = zeros(length(couples))
+    player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:params.n_players] 
+    for player_idx in 1:params.n_players
+        for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
+            parameter_idx = player_couples[player_idx][couple_idx]
+            idx_ego   = (1:2) .+ (couple[1] - 1)*params.n_states_per_player
+            idx_other = (1:2) .+ (couple[2] - 1)*params.n_states_per_player
+            x_ego   = states[idx_ego,1]
+            x_other = states[idx_other,1]
+            x_diff  = x_ego - x_other
+            θ = atan(x_diff[2], x_diff[1])
+
+            θs[parameter_idx] = θ
+        end
+    end
+
     # Define useful vectors
-    function n(t, α, ω)
-        [cos(α + ω * (t-1)), sin(α + ω * (t-1))]
+    function n(t, θ, α, ω)
+        [cos(θ + α + ω * (t - 1) * params.ΔT), sin(θ + α + ω * (t - 1) * params.ΔT)]
     end
 
     function n0(couple, states, pos_idx)
@@ -204,9 +220,16 @@ function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5)
             markersize = 5,
             color = colors,
         )
+        # plot goals from params info with an x
+        scatter!(
+            [params.goals[player][1] for player in 1:(params.n_players)],
+            [params.goals[player][2] for player in 1:(params.n_players)],
+            markersize = 5,
+            marker = :x,
+            color = colors,
+        )
 
         # Plot KoZs
-        
         for (couple_idx, couple)  in enumerate(couples)
             if koz
                 # Plot KoZ around hyperplane owner
@@ -222,7 +245,7 @@ function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5)
             # Plot hyperplane normal
             ni =
                 params.ρs[couple_idx] *
-                n(i, params.αs[couple_idx], params.ωs[couple_idx])
+                n(i, θs[couple_idx], params.αs[couple_idx], params.ωs[couple_idx])
             plot!(
                 [states[pos_idx[couple[2], 1], i], states[pos_idx[couple[2], 1], i] + ni[1]],
                 [states[pos_idx[couple[2], 2], i], states[pos_idx[couple[2], 2], i] + ni[2]],

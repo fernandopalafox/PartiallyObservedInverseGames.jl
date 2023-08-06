@@ -369,6 +369,19 @@ function generate_hyperintegrator_cost(;
         )
     end
 
+    function evaluate_objective(x, u)
+        T = size(x, 2)
+        @views x_sub_ego = x[state_indices, :]
+        @views u_sub_ego = u[input_indices, :]
+        J̃ = (;
+            state_goal = isnothing(goal_position) ? 0 :
+                         sum(el -> el^2, x_sub_ego[1:2, T_activate_goalcost:T] .- goal_position),
+            control_Δv = sum(el -> el^2, u_sub_ego[1:2, :]),
+        )
+
+        sum(weights[k] * cost_prescaling[k] * J̃[k] for k in keys(weights))
+    end
+
     function add_objective_gradients!(opt_model, x, u; weights)
         n_states, T = size(x)
         n_controls = size(u, 1)
@@ -420,7 +433,7 @@ function generate_hyperintegrator_cost(;
         (; dx = dJdx, du = dJdu)
     end
 
-    (; player_inputs = input_indices, weights, add_objective!, add_objective_gradients!, goal_position)
+    (; player_inputs = input_indices, weights, add_objective!, add_objective_gradients!, goal_position, evaluate_objective)
 end
 
 function generate_player_cost_model_simple(;

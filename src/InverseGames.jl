@@ -423,35 +423,45 @@ function solve_inverse_game(
     @unpack n_states, n_controls = control_system
     T  = size(y.x, 2)
 
-    # Setup unknown constraint parameters
-    ωs = @variable(opt_model, [1:n_couples], lower_bound = -0.3, upper_bound = 0.3)
-    αs = @variable(opt_model, [1:n_couples], lower_bound = -pi,  upper_bound = pi)
-    ρs = @variable(opt_model, [1:n_couples], lower_bound = ρmin)
-    constraint_parameters = (; adjacency_matrix, ωs, αs, ρs)
-
     # Other decision variables
-    if !isnothing(constraint_parameters.adjacency_matrix)
+    if !isnothing(adjacency_matrix) && n_couples > 0
+        ωs = @variable(opt_model, [1:n_couples], lower_bound = -2, upper_bound = 2)
+        αs = @variable(opt_model, [1:n_couples], lower_bound = -pi,  upper_bound = pi)
+        ρs = @variable(opt_model, [1:n_couples], lower_bound = ρmin, start = ρmin)
+        constraint_parameters = (; adjacency_matrix, ωs, αs, ρs)
+
         couples = findall(constraint_parameters.adjacency_matrix)
         player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
 
         λ_i = @variable(opt_model, [1:length(couples), 1:T])
         s   = @variable(opt_model, [1:length(couples), 1:T], lower_bound = 0.0) 
+        z   = @variable(opt_model, [1:n_players, 1:T])
+
+        JuMPUtils.init_if_hasproperty!(ωs, init,:ωs)
+        JuMPUtils.init_if_hasproperty!(αs, init,:αs)
+        JuMPUtils.init_if_hasproperty!(ρs, init,:ρs)
+        JuMPUtils.init_if_hasproperty!(s, init, :s)
+        JuMPUtils.init_if_hasproperty!(λ_i, init,:λ_i)
+
+        # TEMPORARY
+        JuMP.fix.(αs, 0.0; force = true)   
+        # JuMP.fix.(ωs, init.ωs; force = true)
+        # JuMP.fix.(ρs, init.ρs; force = true)
+        # JuMP.fix.(z, 0.0; force = true)
     end
     player_weights =
                 [@variable(opt_model, [keys(cost_model.weights)]) for cost_model in player_cost_models]
     x   = @variable(opt_model, [1:n_states, 1:T])
     u   = @variable(opt_model, [1:n_controls, 1:T])
     λ_e = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
-
+    
     # Warmstart
     JuMPUtils.init_if_hasproperty!(x, init, :x)
     JuMPUtils.init_if_hasproperty!(u, init, :u)
     JuMPUtils.init_if_hasproperty!(λ_e, init,:λ_e)
-    JuMPUtils.init_if_hasproperty!(s, init, :s)
-    JuMPUtils.init_if_hasproperty!(λ_i, init,:λ_i)
-    JuMPUtils.init_if_hasproperty!(ωs, init,:ωs)
-    JuMPUtils.init_if_hasproperty!(αs, init,:αs)
-    JuMPUtils.init_if_hasproperty!(ρs, init,:ρs)
+
+    Main.@infiltrate
+    
     if hasproperty(init, :player_weights) && !isnothing(init.player_weights)
         for (ii, weights) in pairs(init.player_weights)
             for k in keys(weights)
@@ -460,14 +470,25 @@ function solve_inverse_game(
         end
     end
 
-    # Fix player weights
-    # for (ii, weights) in pairs(init.player_weights)
-    #     for k in keys(weights)
-    #         JuMP.fix(player_weights[ii][k], weights[k])
-    #     end
-    # end
-
     # ---- Setup constraints ----
+
+    # Initialize angles (only works if fully observable)
+    if n_couples > 0
+        θs = zeros(n_couples)
+        for player_idx in 1:n_players
+            for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
+                parameter_idx = player_couples[player_idx][couple_idx]
+                idx_ego   = (1:2) .+ (couple[1] - 1)*Int(n_states/n_players)
+                idx_other = (1:2) .+ (couple[2] - 1)*Int(n_states/n_players)
+                x_ego = y.x[idx_ego,1]
+                x_other = y.x[idx_other,1]
+                x_diff = x_ego - x_other
+                θ = atan(x_diff[2], x_diff[1])
+
+                θs[parameter_idx] = θ
+            end
+        end
+    end
 
     # Dynamics constraints
     @constraint(opt_model, x[:, 1] .== y.x[:,1])
@@ -481,7 +502,7 @@ function solve_inverse_game(
         dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
 
         # Adjacency matrix denotes shared inequality constraint
-        if !isnothing(constraint_parameters.adjacency_matrix) && 
+        if n_couples > 0 && 
         !isempty(player_couples[player_idx])
 
             # Extract relevant lms and slacks
@@ -491,7 +512,14 @@ function solve_inverse_game(
 
             for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
                 parameter_idx = player_couples[player_idx][couple_idx]
-                parameters = (; couple, ω = ωs[parameter_idx], α = αs[parameter_idx], ρ = ρs[parameter_idx], T_offset = 0)
+                parameters = (;
+                    couple,
+                    θ = θs[parameter_idx],
+                    ω = ωs[parameter_idx],
+                    α = αs[parameter_idx],
+                    ρ = ρs[parameter_idx],
+                    T_offset = 0,
+                )
                 # Extract shared constraint for player couple 
                 hs = DynamicsModelInterface.add_shared_constraint!(
                     control_system.subsystems[player_idx],
@@ -513,7 +541,8 @@ function solve_inverse_game(
                 # One row per couple, timestep indexing along 3rd axis
                 append!(dhdx_container, [dhs.dx])
                 # Feasibility of barrier-ed constraints
-                @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx, t] == 0.0)
+                # @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx, t] == z[player_idx, t])
+                @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx, t] == 0)
             end
             dhdx = vcat(dhdx_container...)
 
@@ -578,19 +607,31 @@ function solve_inverse_game(
     end
 
     # objective
-    @objective(
-        opt_model,
-        Min,
-        sum(el -> el^2, x .- y.x)
-    )
+    # @objective(
+    #     opt_model,
+    #     Min,
+    #     sum(el -> el^2, x .- y.x)
+    #     # + 10*sum(el -> el^2, z)
+    #     # + 0.001 * sum(el -> el^2, ωs)
+    #     # + 0.01 * sum(el -> el^2, αs)
+    #     # + 0.001 * sum(el -> (el - ρmin)^2, ρs) 
+    #     # - 0.0001 * sum(el -> el^2, ρs)
+    # )
 
     # Solve problem 
     time = @elapsed JuMP.optimize!(opt_model)
     @info time
-    solution = merge(
-        JuMPUtils.get_values(; x, u, λ_i, λ_e, s, ωs, αs, ρs),
-        (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights))
-    )
+    solution =
+        n_couples > 0 ?
+        merge(
+            JuMPUtils.get_values(; x, u, λ_i, λ_e, s, ωs, αs, ρs, z),
+            (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights)),
+        ) :
+        merge(
+            JuMPUtils.get_values(; x, u, λ_e),
+            (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights)),
+        )
+    
     (JuMPUtils.isconverged(opt_model), solution)
 end
 
