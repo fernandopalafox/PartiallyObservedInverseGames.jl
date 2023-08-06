@@ -41,21 +41,15 @@ end
 
 function DynamicsModelInterface.add_dynamics_jacobians!(system::DoubleIntegrator, opt_model, x, u)
     ΔT = system.ΔT
-    n_states, T = size(x)
-    n_controls = size(u, 1)
 
     # jacobians of the dynamics in x
-    dfdx = @variable(opt_model, [1:n_states, 1:n_states, 1:T])
-    @constraint(
-        opt_model,
-        [t = 1:T],
-        dfdx[:, :, t] .== [
-            1 0 ΔT 0
-            0 1 0  ΔT
-            0 0 1  0                 
-            0 0 0  1                 
-        ]
-    )
+    dfdx = 
+    [
+        1 0 ΔT 0
+        0 1 0  ΔT
+        0 0 1  0                 
+        0 0 0  1
+    ] .* reshape(ones(T), 1, 1, :)
 
     # jacobians of the dynamics in u
     dfdu = [
@@ -64,8 +58,6 @@ function DynamicsModelInterface.add_dynamics_jacobians!(system::DoubleIntegrator
         ΔT 0
         0 ΔT
     ] .* reshape(ones(T), 1, 1, :)
-
-    Main.@infiltrate
 
     (; dx = dfdx, du = dfdu)
 end
