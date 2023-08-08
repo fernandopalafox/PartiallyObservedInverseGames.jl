@@ -41,6 +41,7 @@ end
 
 function DynamicsModelInterface.add_dynamics_jacobians!(system::DoubleIntegrator, opt_model, x, u)
     ΔT = system.ΔT
+    T  = size(x, 2)
 
     # jacobians of the dynamics in x
     dfdx = 
