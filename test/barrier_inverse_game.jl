@@ -174,7 +174,7 @@ function forward_then_inverse()
     end
 
     y = (;x = solution_forward.x, u = solution_forward.u)
-    adjacency_matrix = zeros(Bool, n_players, n_players)
+    # adjacency_matrix = zeros(Bool, n_players, n_players)
     converged, solution_inverse = solve_inverse_game(
             InverseHyperplaneSolver(),
             y, 
@@ -201,12 +201,17 @@ function forward_then_inverse()
             digits = 2,
         ),
     )
-    if length(findall(adjacency_matrix)) > 0 
+    if length(findall(adjacency_matrix)) > 0
         println("True parameters: ", ω, " ", α, " ", ρ)
-        println("Inferred parameters: ", solution_inverse.ωs[1], " ", solution_inverse.αs[1], " ", solution_inverse.ρs[1])
+        println(
+            "Inferred parameters: ",
+            round(solution_inverse.ωs[1], digits = 2),
+            " ",
+            round(solution_inverse.αs[1], digits = 2),
+            " ",
+            round(solution_inverse.ρs[1], digits = 2),
+        )
     end
-
-    
 
     # ---- Animation trajectories ----
 
@@ -286,9 +291,10 @@ function infer_and_check(data_states, data_inputs)
             T_activate_goalcost,
         )
     end
-    # Solve
-    adjacency_matrix = zeros(Bool, n_players, n_players)
-    (converged, solution_inverse) = solve_inverse_game(
+
+    # First solve 
+    # adjacency_matrix = zeros(Bool, n_players, n_players)
+    converged_1, solution_1, opt_model_1 = solve_inverse_game(
             InverseHyperplaneSolver(),
             y, 
             adjacency_matrix;
@@ -302,6 +308,20 @@ function infer_and_check(data_states, data_inputs)
             μ = μs[1],
         )
 
+    # Feed previous solution as initial guess. Should converge almost immediately
+    converged_2, solution_2, opt_model_2 = solve_inverse_game(
+            InverseHyperplaneSolver(),
+            y, 
+            adjacency_matrix;
+            control_system,
+            player_cost_models,
+            init = solution_1, 
+            solver = Ipopt.Optimizer,
+            solver_attributes = (; max_wall_time = 20.0, print_level = 5),
+            cmin = 1e-5,
+            ρmin,
+            μ = μs[1],
+        )
 
     # visualize_rotating_hyperplanes(
     #         data_states,
@@ -319,33 +339,16 @@ function infer_and_check(data_states, data_inputs)
     #         koz = true,
     #         fps = 10.0,
     #     )
-    animate_trajectory(
-        solution_inverse.x, 
-        (;
-            ΔT = ΔT,
-            title = "traj_1", 
-            n_players, 
-            n_states_per_player = 4
-        );
-        fps = 10
-    )
-
-    Main.@infiltrate
-
-    # Feed previous solution as initial guess. Should converge almost immediately
-    (converged, solution_intermediate) = solve_inverse_game(
-            InverseHyperplaneSolver(),
-            y, 
-            adjacency_matrix;
-            control_system,
-            player_cost_models,
-            init = solution_inverse, 
-            solver = Ipopt.Optimizer,
-            solver_attributes = (; max_wall_time = 20.0, print_level = 5, max_iter = 10),
-            cmin = 1e-5,
-            ρmin,
-            μ = μs[1],
-        )
+    # animate_trajectory(
+    #     solution_inverse.x, 
+    #     (;
+    #         ΔT = ΔT,
+    #         title = "traj_1", 
+    #         n_players, 
+    #         n_states_per_player = 4
+    #     );
+    #     fps = 10
+    # )
 
 end
 

@@ -170,7 +170,9 @@ function solve_game(
     # Shared constraint decision variables 
     if !isnothing(constraint_parameters.adjacency_matrix) && n_couples > 0
         couples = findall(constraint_parameters.adjacency_matrix)
-        player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
+        # player_couple_list = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
+        player_couple_list = [findall(couple -> any(hcat(couple[1], couple[2]) .== player_idx), couples) for player_idx in 1:n_players] 
+
 
         λ_i = @variable(opt_model, [1:length(couples), 1:T])
         s   = @variable(opt_model, [1:length(couples), 1:T], lower_bound = 0.0) 
@@ -188,8 +190,8 @@ function solve_game(
     if n_couples > 0
         θs = zeros(n_couples)
         for player_idx in 1:n_players
-            for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
-                parameter_idx = player_couples[player_idx][couple_idx]
+            for (couple_idx_local, couple) in enumerate(couples[player_couple_list[player_idx]])
+                parameter_idx = player_couple_list[player_idx][couple_idx_local]
                 idx_ego   = (1:2) .+ (couple[1] - 1)*Int(n_states/n_players)
                 idx_other = (1:2) .+ (couple[2] - 1)*Int(n_states/n_players)
                 x_ego = x0[idx_ego,1]
@@ -208,21 +210,34 @@ function solve_game(
     df = DynamicsModelInterface.add_dynamics_jacobians!(control_system, opt_model, x, u)
 
     # KKT conditions
+    used_couples = []
     for (player_idx, cost_model) in enumerate(player_cost_models)
         @unpack player_inputs, weights = cost_model
         dJ = cost_model.add_objective_gradients!(opt_model, x, u; weights)
 
         # Adjacency matrix denotes shared inequality constraint
         if n_couples > 0 && 
-        !isempty(player_couples[player_idx])
+        !isempty(player_couple_list[player_idx])
+
+            # Print adding KKT constraints to player $player_idx with couples $player_couple_list[player_idx]
+            println("Adding KKT constraints to player $player_idx with couples $(player_couple_list[player_idx])")
 
             # Extract relevant lms and slacks
-            λ_i_couple = λ_i[player_couples[player_idx], :]
-            s_couple = s[player_couples[player_idx], :]
+            λ_i_couple = λ_i[player_couple_list[player_idx], :]
+            s_couple = s[player_couple_list[player_idx], :]
             dhdx_container = []
 
-            for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
-                parameter_idx = player_couples[player_idx][couple_idx]
+            for (couple_idx_local, couple) in enumerate(couples[player_couple_list[player_idx]])
+                couple_idx_global = player_couple_list[player_idx][couple_idx_local]
+
+                # Switch couple indices so that player_idx is always first. 
+                # This is to ensure constraint Jacobian is correct
+                if couple[1] != player_idx
+                    couple = CartesianIndex(couple[2], couple[1])
+                end
+
+                # Extract relevant parameters
+                parameter_idx = player_couple_list[player_idx][couple_idx_local]
                 parameters = (;
                     couple,
                     θ = θs[parameter_idx],
@@ -248,12 +263,28 @@ function solve_game(
                     u,
                     parameters,
                 )
+                println("   Computing constraint Jacobian for couple $couple_idx_global: $couple")
+
                 # Stack shared constraint Jacobian. 
                 # One row per couple, timestep indexing along 3rd axis
                 append!(dhdx_container, [dhs.dx])
                 # Feasibility of barrier-ed constraints
-                # @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx, t] == z[player_idx, t])
-                @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx, t] == 0)
+                # @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx_local, t] == z[player_idx, t])
+                if couple_idx_global ∉ used_couples # Add constraint only if not already added
+                    # Extract shared constraint for player couple 
+                    hs = DynamicsModelInterface.add_shared_constraint!(
+                        control_system.subsystems[player_idx],
+                        opt_model,
+                        x,
+                        u,
+                        parameters;
+                        set = false,
+                    )
+                    @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx_local, t] == 0)
+                    push!(used_couples, couple_idx_global) # Add constraint to list of used constraints
+                    println("   Adding shared constraint feasiblity for couple $couple_idx_global: $couple")
+                end   
+
             end
             dhdx = vcat(dhdx_container...)
 
@@ -279,12 +310,14 @@ function solve_game(
             @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
 
             # Gradient of the Lagrangian wrt s is zero
-            n_s_couple = length(s_couple)
-            λ_i_couple_reshaped = reshape(λ_i_couple', (1, :))
-            s_couple_reshaped = reshape(s_couple', (1, :))
-            s_couple_inv = @variable(opt_model, [2:n_s_couple])
-            @NLconstraint(opt_model, [t = 2:n_s_couple], s_couple_inv[t] == 1 / s_couple_reshaped[t])
-            @constraint(opt_model, [t = 2:n_s_couple], -μ * s_couple_inv[t] - λ_i_couple_reshaped[t] == 0)
+            if player_idx == 1
+                n_s_couple = length(s_couple)
+                λ_i_couple_reshaped = reshape(λ_i_couple', (1, :))
+                s_couple_reshaped = reshape(s_couple', (1, :))
+                s_couple_inv = @variable(opt_model, [2:n_s_couple])
+                @NLconstraint(opt_model, [t = 2:n_s_couple], s_couple_inv[t] == 1 / s_couple_reshaped[t])
+                @constraint(opt_model, [t = 2:n_s_couple], -μ * s_couple_inv[t] - λ_i_couple_reshaped[t] == 0)
+            end
 
         else
             # Gradient of the Lagrangian wrt x is zero 

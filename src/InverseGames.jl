@@ -431,11 +431,12 @@ function solve_inverse_game(
         constraint_parameters = (; adjacency_matrix, ωs, αs, ρs)
 
         couples = findall(constraint_parameters.adjacency_matrix)
-        player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
+        # player_couple_list = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
+        player_couple_list = [findall(couple -> any(hcat(couple[1], couple[2]) .== player_idx), couples) for player_idx in 1:n_players] 
 
         λ_i = @variable(opt_model, [1:length(couples), 1:T])
         s   = @variable(opt_model, [1:length(couples), 1:T], lower_bound = 0.0) 
-        z   = @variable(opt_model, [1:n_players, 1:T])
+        # z   = @variable(opt_model, [1:n_players, 1:T])
 
         JuMPUtils.init_if_hasproperty!(ωs, init,:ωs)
         JuMPUtils.init_if_hasproperty!(αs, init,:αs)
@@ -448,6 +449,7 @@ function solve_inverse_game(
         # JuMP.fix.(ωs, init.ωs; force = true)
         # JuMP.fix.(ρs, init.ρs; force = true)
         # JuMP.fix.(z, 0.0; force = true)
+
     end
     player_weights =
                 [@variable(opt_model, [keys(cost_model.weights)]) for cost_model in player_cost_models]
@@ -459,9 +461,6 @@ function solve_inverse_game(
     JuMPUtils.init_if_hasproperty!(x, init, :x)
     JuMPUtils.init_if_hasproperty!(u, init, :u)
     JuMPUtils.init_if_hasproperty!(λ_e, init,:λ_e)
-
-    Main.@infiltrate
-    
     if hasproperty(init, :player_weights) && !isnothing(init.player_weights)
         for (ii, weights) in pairs(init.player_weights)
             for k in keys(weights)
@@ -476,8 +475,8 @@ function solve_inverse_game(
     if n_couples > 0
         θs = zeros(n_couples)
         for player_idx in 1:n_players
-            for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
-                parameter_idx = player_couples[player_idx][couple_idx]
+            for (couple_idx_local, couple) in enumerate(couples[player_couple_list[player_idx]])
+                parameter_idx = player_couple_list[player_idx][couple_idx_local]
                 idx_ego   = (1:2) .+ (couple[1] - 1)*Int(n_states/n_players)
                 idx_other = (1:2) .+ (couple[2] - 1)*Int(n_states/n_players)
                 x_ego = y.x[idx_ego,1]
@@ -496,6 +495,7 @@ function solve_inverse_game(
     df = DynamicsModelInterface.add_dynamics_jacobians!(control_system, opt_model, x, u)
 
     # KKT conditions
+    used_couples = []
     for (player_idx, cost_model) in enumerate(player_cost_models)
         weights = player_weights[player_idx]
         @unpack player_inputs = cost_model
@@ -503,15 +503,27 @@ function solve_inverse_game(
 
         # Adjacency matrix denotes shared inequality constraint
         if n_couples > 0 && 
-        !isempty(player_couples[player_idx])
+        !isempty(player_couple_list[player_idx])
+
+            # Print adding KKT constraints to player $player_idx with couples $player_couple_list[player_idx]
+            println("Adding KKT constraints to player $player_idx with couples $(player_couple_list[player_idx])")
 
             # Extract relevant lms and slacks
-            λ_i_couple = λ_i[player_couples[player_idx], :]
-            s_couple = s[player_couples[player_idx], :]
+            λ_i_couple = λ_i[player_couple_list[player_idx], :]
+            s_couple = s[player_couple_list[player_idx], :]
             dhdx_container = []
 
-            for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
-                parameter_idx = player_couples[player_idx][couple_idx]
+            for (couple_idx_local, couple) in enumerate(couples[player_couple_list[player_idx]])
+                couple_idx_global = player_couple_list[player_idx][couple_idx_local]
+                
+                # Switch couple indices so that player_idx is always first. 
+                # This is to ensure constraint Jacobian is correct
+                if couple[1] != player_idx
+                    couple = CartesianIndex(couple[2], couple[1])
+                end
+
+                # Extract relevant parameters
+                parameter_idx = player_couple_list[player_idx][couple_idx_local]
                 parameters = (;
                     couple,
                     θ = θs[parameter_idx],
@@ -519,15 +531,6 @@ function solve_inverse_game(
                     α = αs[parameter_idx],
                     ρ = ρs[parameter_idx],
                     T_offset = 0,
-                )
-                # Extract shared constraint for player couple 
-                hs = DynamicsModelInterface.add_shared_constraint!(
-                    control_system.subsystems[player_idx],
-                    opt_model,
-                    x,
-                    u,
-                    parameters;
-                    set = false,
                 )
                 # Extract shared constraint Jacobian 
                 dhs = DynamicsModelInterface.add_shared_jacobian!(
@@ -537,13 +540,30 @@ function solve_inverse_game(
                     u,
                     parameters,
                 )
+                println("   Computing constraint Jacobian for couple $couple_idx_global: $couple")
+
                 # Stack shared constraint Jacobian. 
                 # One row per couple, timestep indexing along 3rd axis
                 append!(dhdx_container, [dhs.dx])
                 # Feasibility of barrier-ed constraints
-                # @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx, t] == z[player_idx, t])
-                @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx, t] == 0)
+                # @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx_local, t] == z[player_idx, t])
+                if couple_idx_global ∉ used_couples # Add constraint only if not already added
+                    # Extract shared constraint for player couple 
+                    hs = DynamicsModelInterface.add_shared_constraint!(
+                        control_system.subsystems[player_idx],
+                        opt_model,
+                        x,
+                        u,
+                        parameters;
+                        set = false,
+                    )
+                    @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx_local, t] == 0)
+                    push!(used_couples, couple_idx_global) # Add constraint to list of used constraints
+                    println("   Adding shared constraint feasiblity for couple $couple_idx_global: $couple")
+                end                
+                
             end
+            # dhdx_container = dhdx_containers[player_couple_list[player_idx]]
             dhdx = vcat(dhdx_container...)
 
             # Gradient of the Lagrangian wrt x is zero 
@@ -568,14 +588,19 @@ function solve_inverse_game(
             @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
 
             # Gradient of the Lagrangian wrt s is zero
-            n_s_couple = length(s_couple)
-            λ_i_couple_reshaped = reshape(λ_i_couple', (1, :))
-            s_couple_reshaped = reshape(s_couple', (1, :))
-            s_couple_inv = @variable(opt_model, [2:n_s_couple])
-            @NLconstraint(opt_model, [t = 2:n_s_couple], s_couple_inv[t] == 1 / s_couple_reshaped[t])
-            @constraint(opt_model, [t = 2:n_s_couple], -μ * s_couple_inv[t] - λ_i_couple_reshaped[t] == 0)
+            if player_idx == 1
+                n_s_couple = length(s_couple)
+                λ_i_couple_reshaped = reshape(λ_i_couple', (1, :))
+                s_couple_reshaped = reshape(s_couple', (1, :))
+                s_couple_inv = @variable(opt_model, [2:n_s_couple])
+                @NLconstraint(opt_model, [t = 2:n_s_couple], s_couple_inv[t] == 1 / s_couple_reshaped[t])
+                @constraint(opt_model, [t = 2:n_s_couple], -μ * s_couple_inv[t] - λ_i_couple_reshaped[t] == 0)
+            end
 
         else
+            # Adding non-shared constraints
+            println("Adding KKT constraints to player $player_idx with no shared constraints")
+            
             # Gradient of the Lagrangian wrt x is zero 
             @constraint(
                 opt_model,
@@ -607,16 +632,16 @@ function solve_inverse_game(
     end
 
     # objective
-    # @objective(
-    #     opt_model,
-    #     Min,
-    #     sum(el -> el^2, x .- y.x)
-    #     # + 10*sum(el -> el^2, z)
-    #     # + 0.001 * sum(el -> el^2, ωs)
-    #     # + 0.01 * sum(el -> el^2, αs)
-    #     # + 0.001 * sum(el -> (el - ρmin)^2, ρs) 
-    #     # - 0.0001 * sum(el -> el^2, ρs)
-    # )
+    @objective(
+        opt_model,
+        Min,
+        sum(el -> el^2, x .- y.x)
+        # + 10*sum(el -> el^2, z)
+        # + 0.001 * sum(el -> el^2, ωs)
+        # + 0.01 * sum(el -> el^2, αs)
+        # + 0.001 * sum(el -> (el - ρmin)^2, ρs) 
+        # - 0.0001 * sum(el -> el^2, ρs)
+    )
 
     # Solve problem 
     time = @elapsed JuMP.optimize!(opt_model)
@@ -624,7 +649,7 @@ function solve_inverse_game(
     solution =
         n_couples > 0 ?
         merge(
-            JuMPUtils.get_values(; x, u, λ_i, λ_e, s, ωs, αs, ρs, z),
+            JuMPUtils.get_values(; x, u, λ_i, λ_e, s, ωs, αs, ρs),
             (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights)),
         ) :
         merge(
@@ -632,7 +657,7 @@ function solve_inverse_game(
             (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights)),
         )
     
-    (JuMPUtils.isconverged(opt_model), solution)
+    JuMPUtils.isconverged(opt_model), solution, opt_model
 end
 
 struct InverseWeightSolver end
