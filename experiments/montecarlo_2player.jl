@@ -83,8 +83,19 @@ function infer()
     # Plot inverse game
     visualize_rotating_hyperplanes(
         solution_inverse.x,
-        (; ΔT, adjacency_matrix, ωs = solution_inverse.ωs, αs = solution_inverse.αs, ρs = solution_inverse.ρs , title = "Inverse", n_players, n_states_per_player);
-        koz = true, fps = 10.0
+        (;
+            ΔT,
+            adjacency_matrix,
+            ωs = solution_inverse.ωs,
+            αs = solution_inverse.αs,
+            ρs = solution_inverse.ρs,
+            title = "Inverse",
+            n_players,
+            n_states_per_player,
+            goals = [player_cost_models[i].goal_position for i in 1:n_players],
+        );
+        koz = true,
+        fps = 10.0,
     )
 
     solution_inverse
@@ -104,6 +115,7 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
     # Useful numbers 
     n_players = length(solution_inverse.player_weights)
     T = length(solution_inverse.x[1,:])
+    T = 40
 
     # System 
     control_system = TestDynamics.ProductSystem([TestDynamics.DoubleIntegrator(ΔT) for _ in 1:n_players]) 
@@ -127,10 +139,7 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
         ]...,
         )
 
-        # Skip if initial positions closer than smallest KoZ radius
-        if norm(x0[1:2,:] - x0[5:6,:]) < 1.2*minimum(solution_inverse.ρs)
-            continue
-        end
+        
 
         # Setup costs and control system 
         as_goals = rand(rng, n_players) .* 2*pi # random goal for each player
@@ -146,8 +155,6 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
                 T_activate_goalcost,
             )
         end
-
-        Main.@infiltrate
 
         # Check for possible collisions
         adjacency_matrix = [false for _ in 1:n_players, _ in 1:n_players]
@@ -170,17 +177,31 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
                 end 
             end
         end
-        # Only run forward simulation if there is a possible collision
+        # Skip if initial positions closer than smallest KoZ radius
+        if norm(x0[1:2,:] - x0[5:6,:]) < 1.2*minimum(solution_inverse.ρs)
+            continue
+        end
+        # Skip if goal positions are closer than smallest KoZ radius
+        if norm(player_cost_models[1].goal_position - player_cost_models[2].goal_position) < 5.0*minimum(solution_inverse.ρs)
+            continue
+        end
+        # Skif if collisions are not likely
         if !any(adjacency_matrix)
             continue
         end
 
+        # Initialize with regular kkt solution
+        _, solution_kkt, _ = 
+        solve_game(KKTGameSolver(), control_system, player_cost_models, x0, T; 
+        solver = Ipopt.Optimizer, 
+        solver_attributes = (; max_wall_time, print_level = 5))
+
         constraint_parameters = (;adjacency_matrix, ωs = solution_inverse.ωs, αs = solution_inverse.αs, ρs = solution_inverse.ρs)
         converged_forward, time_forward, solution_forward = 
             solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, constraint_parameters, T;
-            init = (; s = solution_inverse.s),
+            init = (;x = solution_kkt.x, u = solution_kkt.u, s = 1.5),
             solver = Ipopt.Optimizer, 
-            solver_attributes = (; max_wall_time, print_level = 1),
+            solver_attributes = (; max_wall_time, print_level = 5),
             μ
             )
 
@@ -190,6 +211,39 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
         #                 (; ΔT = 0.1, adjacency_matrix = results.adjacency_matrix[2], ωs = solution_inverse.ωs, αs = solution_inverse.αs, ρs = solution_inverse.ρs , title = "New FWD", n_players = 2, n_states_per_player = 4);
         #                             koz = true, fps = 10.0
         # )
+
+        visualize_rotating_hyperplanes(
+            solution_kkt.x,
+            (;
+                ΔT = 0.1,
+                adjacency_matrix = zeros(Bool, 2, 2),
+                ωs = solution_inverse.ωs,
+                αs = solution_inverse.αs,
+                ρs = solution_inverse.ρs,
+                title = "fwd_kkt",
+                n_players = 2,
+                n_states_per_player = 4,
+                goals = [player_cost_models[i].goal_position for i in 1:n_players],
+            );
+            koz = true,
+            fps = 10.0,
+        )
+        visualize_rotating_hyperplanes(
+            solution_forward.x,
+            (;
+                ΔT = 0.1,
+                adjacency_matrix = adjacency_matrix,
+                ωs = solution_inverse.ωs,
+                αs = solution_inverse.αs,
+                ρs = solution_inverse.ρs,
+                title = "fwd_barrier",
+                n_players = 2,
+                n_states_per_player = 4,
+                goals = [player_cost_models[i].goal_position for i in 1:n_players],
+            );
+            koz = true,
+            fps = 10.0,
+        )
 
         # Print trial number, whether it converged or not, and the time it took
         println("Trial $i: Converged: $converged_forward, Time: $time_forward")

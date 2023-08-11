@@ -423,7 +423,7 @@ function solve_inverse_game(
     @unpack n_states, n_controls = control_system
     T  = size(y.x, 2)
 
-    # Other decision variables
+    # Decision variables
     if !isnothing(adjacency_matrix) && n_couples > 0
         ωs = @variable(opt_model, [1:n_couples], lower_bound = -2, upper_bound = 2)
         αs = @variable(opt_model, [1:n_couples], lower_bound = -pi,  upper_bound = pi)
@@ -516,12 +516,6 @@ function solve_inverse_game(
             for (couple_idx_local, couple) in enumerate(couples[player_couple_list[player_idx]])
                 couple_idx_global = player_couple_list[player_idx][couple_idx_local]
                 
-                # Switch couple indices so that player_idx is always first. 
-                # This is to ensure constraint Jacobian is correct
-                if couple[1] != player_idx
-                    couple = CartesianIndex(couple[2], couple[1])
-                end
-
                 # Extract relevant parameters
                 parameter_idx = player_couple_list[player_idx][couple_idx_local]
                 parameters = (;
@@ -560,10 +554,17 @@ function solve_inverse_game(
                     @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx_local, t] == 0)
                     push!(used_couples, couple_idx_global) # Add constraint to list of used constraints
                     println("   Adding shared constraint feasiblity for couple $couple_idx_global: $couple")
+
+                    # ∇ₛL = -μ * s⁻¹ - λ_i = 0
+                    # Only needs to be done once per couple
+                    n_s_couple = length(s_couple)
+                    λ_i_couple_reshaped = reshape(λ_i_couple', (1, :))
+                    s_couple_reshaped = reshape(s_couple', (1, :))
+                    s_couple_inv = @variable(opt_model, [2:n_s_couple])
+                    @NLconstraint(opt_model, [t = 2:n_s_couple], s_couple_inv[t] == 1 / s_couple_reshaped[t])
+                    @constraint(opt_model, [t = 2:n_s_couple], -μ * s_couple_inv[t] - λ_i_couple_reshaped[t] == 0)
                 end                
-                
             end
-            # dhdx_container = dhdx_containers[player_couple_list[player_idx]]
             dhdx = vcat(dhdx_container...)
 
             # Gradient of the Lagrangian wrt x is zero 
@@ -586,17 +587,6 @@ function solve_inverse_game(
                 0
             )
             @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
-
-            # Gradient of the Lagrangian wrt s is zero
-            if player_idx == 1
-                n_s_couple = length(s_couple)
-                λ_i_couple_reshaped = reshape(λ_i_couple', (1, :))
-                s_couple_reshaped = reshape(s_couple', (1, :))
-                s_couple_inv = @variable(opt_model, [2:n_s_couple])
-                @NLconstraint(opt_model, [t = 2:n_s_couple], s_couple_inv[t] == 1 / s_couple_reshaped[t])
-                @constraint(opt_model, [t = 2:n_s_couple], -μ * s_couple_inv[t] - λ_i_couple_reshaped[t] == 0)
-            end
-
         else
             # Adding non-shared constraints
             println("Adding KKT constraints to player $player_idx with no shared constraints")
@@ -761,7 +751,7 @@ function solve_inverse_game(
         JuMPUtils.get_values(; x, u, λ_e),
         (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights))
     )
-    (JuMPUtils.isconverged(opt_model), solution)
+    (JuMPUtils.isconverged(opt_model), solution, opt_model)
 end
 
 end
