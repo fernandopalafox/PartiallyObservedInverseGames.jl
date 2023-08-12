@@ -145,7 +145,7 @@ function solve_game(
 )
 
     # ---- Initial settings ---- 
-    n_players = length(control_system.subsystems)
+    n_players = length(player_cost_models)
     n_couples = length(findall(constraint_parameters.adjacency_matrix))
 
     # ---- Setup solver ---- 
@@ -165,8 +165,8 @@ function solve_game(
         # player_couple_list = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
         player_couple_list = [findall(couple -> any(hcat(couple[1], couple[2]) .== player_idx), couples) for player_idx in 1:n_players] 
 
-        λ_i = @variable(opt_model, [1:length(couples), 1:T])
-        s   = @variable(opt_model, [1:length(couples), 1:T], lower_bound = 0.0) 
+        λ_i = @variable(opt_model, [1:length(couples), 2:T])
+        s   = @variable(opt_model, [1:length(couples), 2:T], lower_bound = 0.0) 
 
         JuMPUtils.init_if_hasproperty!(s, init, :s)
         JuMPUtils.init_if_hasproperty!(λ_i, init,:λ_i)
@@ -220,8 +220,8 @@ function solve_game(
             println("Adding KKT constraints to player $player_idx with couples $(player_couple_list[player_idx])")
 
             # Extract relevant lms and slacks
-            λ_i_couple = λ_i[player_couple_list[player_idx], :]
-            s_couple = s[player_couple_list[player_idx], :]
+            λ_i_couples = λ_i[player_couple_list[player_idx], :]
+            s_couples = s[player_couple_list[player_idx], :]
             dhdx_container = []
 
             for (couple_idx_local, couple) in enumerate(couples[player_couple_list[player_idx]])
@@ -237,7 +237,7 @@ function solve_game(
                     ρ = ρs[parameter_idx],
                     T_offset = 0,
                 )
-                
+
                 # Extract shared constraint Jacobian 
                 dhs = DynamicsModelInterface.add_shared_jacobian!(
                     control_system.subsystems[player_idx],
@@ -251,8 +251,8 @@ function solve_game(
                 # Stack shared constraint Jacobian. 
                 # One row per couple, timestep indexing along 3rd axis
                 append!(dhdx_container, [dhs.dx])
+
                 # Feasibility of barrier-ed constraints
-                # @constraint(opt_model, [t = 1:T], hs(t) - s_couple[couple_idx_local, t] == z[player_idx, t])
                 if couple_idx_global ∉ used_couples # Add constraint only if not already added
                     # Extract shared constraint for player couple 
                     hs = DynamicsModelInterface.add_shared_constraint!(
@@ -263,18 +263,16 @@ function solve_game(
                         parameters;
                         set = false,
                     )
-                    @constraint(opt_model, hyperplane[t = 1:T], hs(t) - s_couple[couple_idx_local, t] == 0)
+
+                    # Enforce shared constraint feasibility
+                    @constraint(opt_model, [t = 2:T], hs(t) - s_couples[couple_idx_local, t] == 0)
                     push!(used_couples, couple_idx_global) # Add constraint to list of used constraints
                     println("   Adding shared constraint feasiblity for couple $couple_idx_global: $couple")
 
                     # ∇ₛL = -μ * s⁻¹ - λ_i = 0
-                    # Only needs to be done once per couple
-                    n_s_couple = length(s_couple)
-                    λ_i_couple_reshaped = reshape(λ_i_couple', (1, :))
-                    s_couple_reshaped = reshape(s_couple', (1, :))
-                    s_couple_inv = @variable(opt_model, [2:n_s_couple])
-                    @NLconstraint(opt_model, [t = 2:n_s_couple], s_couple_inv[t] == 1 / s_couple_reshaped[t])
-                    @constraint(opt_model, [t = 2:n_s_couple], -μ * s_couple_inv[t] - λ_i_couple_reshaped[t] == 0)
+                    s_couple_inv = @variable(opt_model, [t = 2:T])
+                    @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s_couples[couple_idx_local, t])
+                    @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_i_couples[couple_idx_local, t] == 0)
                 end   
             end
             dhdx = vcat(dhdx_container...)
@@ -284,11 +282,11 @@ function solve_game(
                 opt_model,
                 [t = 2:(T - 1)],
                 dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' -
-                λ_e[:, t, player_idx]' * df.dx[:, :, t] + λ_i_couple[:, t]' * dhdx[:, :, t] .== 0
+                λ_e[:, t, player_idx]' * df.dx[:, :, t] + λ_i_couples[:, t].data' * dhdx[:, :, t] .== 0
             )
             @constraint(
                 opt_model,
-                dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' + λ_i_couple[:, T]' * dhdx[:, :, T] .== 0
+                dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' + λ_i_couples[:, T].data' * dhdx[:, :, T] .== 0
             ) 
 
             # Gradient of the Lagrangian wrt player's own inputs is zero
@@ -326,9 +324,10 @@ function solve_game(
         end
     
     end
+
     
     # Match equilbrium 
-    @objective(opt_model, Min, sum((x[:, :] .- init.x).^2))
+    # @objective(opt_model, Min, sum((x[:, :] .- init.x).^2))
 
     # Solve problem 
     time = @elapsed JuMP.optimize!(opt_model)
