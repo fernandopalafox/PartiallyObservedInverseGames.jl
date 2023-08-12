@@ -16,11 +16,21 @@ end
 
 function DynamicsModelInterface.next_x(system::Satellite2D, x_t, u_t)
     ΔT = system.ΔT
+    m  = system.m
     @assert only(size(x_t)) == 4
     @assert only(size(u_t)) == 2
-    px, py, vx, vy = x_t
-    Δvx, Δvy = u_t
-    [px + ΔT * vx, py + ΔT * vy, vx + ΔT * Δvx, vy + ΔT * Δvy]
+
+    A_d = [ 4-3*cos(n*ΔT)      0  1/n*sin(n*ΔT)     2/n*(1-cos(n*ΔT));
+            6*(sin(n*ΔT)-n*ΔT) 1 -2/n*(1-cos(n*ΔT)) 1/n*(4*sin(n*ΔT)-3*n*ΔT);
+            3*n*sin(n*ΔT)      0  cos(n*ΔT)         2*sin(n*ΔT);
+           -6*n*(1-cos(n*ΔT))  0 -2*sin(n*ΔT)       4*cos(n*ΔT)-3];
+
+    B_d = 1/m*[ 1/n^2(1-cos(n*ΔT))     2/n^2*(n*ΔT-sin(n*ΔT));
+               -2/n^2*(n*ΔT-sin(n*ΔT)) 4/n^2*(1-cos(n*ΔT))-3/2*ΔT^2;
+                1/n*sin(n*ΔT)          2/n*(1-cos(n*ΔT));
+               -2/n*(1-cos(n*ΔT))      4/n*sin(n*ΔT)-3*ΔT]
+
+    return A_d * x_t + B_d * u_t
 end
 
 # These constraints encode the dynamics of a 2d with state layout x_t = [px, py, vx, vy] and
@@ -66,12 +76,13 @@ function DynamicsModelInterface.add_dynamics_jacobians!(system::Satellite2D, opt
                -2/n*(1-cos(n*ΔT))      4/n*sin(n*ΔT)-3*ΔT]
 
     # jacobians of the dynamics in x
-    dfdx = @variable(opt_model, [1:n_states, 1:n_states, 1:T])
-    @constraint(
-        opt_model,
-        [t = 1:T],
-        dfdx[:, :, t] .== A_d
-    )
+    # dfdx = @variable(opt_model, [1:n_states, 1:n_states, 1:T])
+    # @constraint(
+    #     opt_model,
+    #     [t = 1:T],
+    #     dfdx[:, :, t] .== A_d
+    # )
+    dfdx = A_d .* reshape(ones(T), 1, 1, :)
 
     # jacobians of the dynamics in u
     dfdu = B_d .* reshape(ones(T), 1, 1, :)
