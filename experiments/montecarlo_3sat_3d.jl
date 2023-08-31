@@ -36,15 +36,20 @@ function infer()
     ΔT = 0.1
     n_states_per_player = 4
     scale = 1
-    ρmin = 0.5
+    ρmin = 0.1
 
-    adjacency_matrix = [false true; 
-                        false false]
+    adjacency_matrix = [false true  true;
+                        false false true;
+                        false false false]
+    # adjacency_matrix = [false true  true  true;
+    #                     false false true  true;
+    #                     false false false true;
+    #                     false false false false]
     μs = [1e-6]
     
     # Load data 
-    data_states   = Matrix(CSV.read("data/f_2d_s.csv", DataFrame, header = false))
-    data_inputs   = Matrix(CSV.read("data/f_2d_c.csv", DataFrame, header = false))
+    data_states   = Matrix(CSV.read("data/f_2d_3p_s.csv", DataFrame, header = false))
+    data_inputs   = Matrix(CSV.read("data/f_2d_3p_c.csv", DataFrame, header = false))
     y = (;x = data_states, u = data_inputs)
 
     T = size(data_states, 2)
@@ -57,6 +62,7 @@ function infer()
     # Presumed cost system with dummy variables
     as = [2*pi/n_players * (i-1) for i in 1:n_players]
     as = [a > pi ? a - 2*pi : a for a in as]
+    # zs = [1.0, 1.0, 1.0]
     player_cost_models = map(enumerate(as)) do (ii, a)
         cost_model = CollisionAvoidanceGame.generate_hyperintegrator_cost(;
             player_idx = ii,
@@ -154,10 +160,12 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
     i = 1
     i_sample = 1
     while i <= trials
+        
 
         # Generate initial position and velocity for each player
         as = rand(rng, n_players) .* 2*pi
-        zs_0 = rand(rng, n_players)
+        # zs_0 = rand(rng, n_players)
+        zs_0 = zeros(n_players)
         x0 = vcat(
         [
             vcat(-scale*unitvector(a), zs_0[idx], [v_init*cos(a - os), v_init*sin(a - os), 0]) for
@@ -166,12 +174,15 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
         )
 
         # Setup costs and control system 
-        as_goals = rand(rng, n_players) .* 2*pi # random goal for each player
-        zs_goals = rand(rng, n_players) # random goal for each player
+        # as_goals = rand(rng, n_players) .* 2*pi # random goal for each player
+        as_goals = as
+        # zs_goals = rand(rng, n_players) # random goal for each player
+        zs_goals = ones(n_players)
 
         # Costs
-        weights = [1.0 0.00001;
-                   1.0 0.00001];   
+        weights = [10.0 0.00001;
+                   10.0 0.00001; 
+                   10.0 0.00001];   
 
         player_cost_models = map(enumerate(as_goals)) do (ii, a)
             cost_model_p1 = CollisionAvoidanceGame.generate_3dintegrator_cost(;
@@ -186,21 +197,18 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
             )
         end
 
-        # Check for possible collisions
         skip = false
         i_sample = i_sample + 1
         println("   Sample counter = $i_sample")
         if i_sample > 50
             break
         end
+
         # Skip if any two initial positions are closer than maximum KoZ radius
         for i in 1:n_players
             for j in 1:n_players
                 if i != j
-                    if norm(
-                        x0[(1:2) .+ (i - 1) * n_states_per_player] -
-                        x0[(1:2) .+ (j - 1) * n_states_per_player],
-                    ) < maximum(solution_inverse.ρs)
+                    if norm(x0[(1:2) .+ (i - 1)*n_states_per_player] - x0[(1:2) .+ (j - 1)*n_states_per_player]) < 1.2*maximum(solution_inverse.ρs)
                         skip = true
                     end
                 end
@@ -210,37 +218,23 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
         for i in 1:n_players
             for j in 1:n_players
                 if i != j
-                    if norm(
-                        player_cost_models[i].goal_position[1:2] -
-                        player_cost_models[j].goal_position[1:2],
-                    ) < maximum(solution_inverse.ρs)
+                    if norm(player_cost_models[i].goal_position[1:2] - player_cost_models[j].goal_position[1:2]) < 1.2*maximum(solution_inverse.ρs)
                         skip = true
                     end
                 end
             end
         end
-        # Check for intersecting lines between initial and goal positions
-        for i in 1:n_players
-            for j in 1:n_players
-                if i != j
-                    idx_p1 = (1:2) .+ (i - 1) * n_states_per_player
-                    idx_p2 = (1:2) .+ (j - 1) * n_states_per_player
-                    if !collision_likely(
-                        x0[idx_p1],
-                        player_cost_models[i].goal_position,
-                        x0[idx_p2],
-                        player_cost_models[j].goal_position,
-                    )
-                        skip = true
-                    end
-                end
-            end
-        end
+
         if skip 
             continue
         end
 
-        # Initialize with regular kkt solution
+        adjacency_matrix = [false true  true;
+                            false false true;
+                            false false false]
+        
+
+        # Solve forward game with KKT solver
         _, solution_kkt, _ = 
         solve_game(KKTGameSolver(), control_system, player_cost_models, x0, T; 
         solver = Ipopt.Optimizer, 
@@ -249,27 +243,27 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
         # Check closest approach and skip if closest approach is greater than smallest KoZ radius
         if minimum(min_distance(solution_kkt.x, (;n_players, n_states_per_player))) > 1.0*minimum(solution_inverse.ρs)
             continue
-        end 
+        end      
 
         # Solve forward game with inferred hyperplane
-        adjacency_matrix = [false true; 
-                            false false]
         constraint_parameters = (;adjacency_matrix, ωs = solution_inverse.ωs, αs = solution_inverse.αs, ρs = solution_inverse.ρs)
         converged_forward, time_forward, solution_hyp, _ = 
             solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, constraint_parameters, T;
-            init = (;x = solution_kkt.x, u = solution_kkt.u, s = 1.5),
+            # init = (;x = solution_kkt.x, u = solution_kkt.u, s = 1.5),
+            init = (;s = 1.5),
             solver = Ipopt.Optimizer, 
-            solver_attributes = (; max_wall_time, print_level = 5),
+            solver_attributes = (; max_wall_time = 20.0, print_level = 5),
             μ
             )
 
         # Visualization 
-        if visualize 
+        if visualize || !converged_forward
             plot_parameters = 
                 (;
-                    n_players = 2,
+                    n_players = 3,
                     n_states_per_player = 6,
                     goals = [player_cost_models[player].goal_position for player in 1:n_players],
+                    adjacency_matrix,
                     couples = findall(adjacency_matrix),
                     ωs = solution_inverse.ωs,
                     αs = solution_inverse.αs,
@@ -281,7 +275,7 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
                 plot_parameters
                 ;
                 title = "Collision avoidance w/ rotating hyperplane",
-                hyperplane = true
+                hyperplane = false
             )
             trajectory_comparison(
                 solution_kkt.x,
@@ -289,10 +283,10 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
                 plot_parameters
             )
             visualize_rotating_hyperplanes( 
-                vcat(solution_hyp.x[1:4, :], solution_hyp.x[7:10, :]), # dirty hack 
+                vcat(solution_hyp.x[1:4, :], solution_hyp.x[7:10, :], solution_hyp.x[13:16, :]), # dirty hack 
                 (;
                     n_states_per_player = 4,
-                    n_players = 2,
+                    n_players = 3,
                     ΔT = ΔT,
                     goals = [player_cost_models[player].goal_position for player in 1:n_players],
                     adjacency_matrix,
@@ -319,7 +313,7 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
         push!(results_time, time_forward)
 
         # Plot segments
-        if !converged_forward
+        if !converged_forward || true #temporary
             plt = plot(title = "Trial $i, Converged = $converged_forward",
                         xlabel = "x",
                         ylabel = "y",

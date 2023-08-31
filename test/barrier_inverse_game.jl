@@ -78,7 +78,7 @@ function generate_forward_game()
         kkt_solution.x, 
         (;
             ΔT = ΔT,
-            title = "double integrators", 
+            title = "double_integrators", 
             n_players, 
             n_states_per_player = 4
         );
@@ -88,6 +88,37 @@ function generate_forward_game()
 
     kkt_solution.x, kkt_solution.u
 end
+
+# function initialize_duals(opt_model_old, opt_model_new)
+#     Main.@infiltrate
+    
+#     constraint_solution = Dict()
+#     for (F, S) in JuMP.list_of_constraint_types(opt_model_old)
+#         # We add a try-catch here because some constraint types might not
+#         # support getting the primal or dual solution.
+#         try
+#             for (ref_old, ref_new) in zip(
+#                 JuMP.all_constraints(opt_model_old, F, S),
+#                 JuMP.all_constraints(opt_model_new, F, S),
+#             )
+#                 constraint_solution[ref_new] = (JuMP.value(ref_old), JuMP.dual(ref_old))
+#             end
+#         catch
+#             @info("Something went wrong getting $F-in-$S. Skipping")
+#         end
+#     end
+#     # Now we can loop through our cached solutions and set the starting values.
+#     # for (x, primal_start) in variable_primal
+#     #     set_start_value(x, primal_start)
+#     # end
+
+#     for (ci, (primal_start, dual_start)) in constraint_solution
+#         # JuMP.set_start_value(ci, primal_start)
+#         JuMP.set_dual_start_value(ci, dual_start)
+#     end
+#     return
+
+# end
 
 
 function forward_then_inverse()
@@ -115,9 +146,8 @@ function forward_then_inverse()
     
 
     # Solver  
-    μ = 1e-5
-    max_wall_time = 60.0
-    ρmin = 0.05
+    μ = 1e-7
+    ρmin = 0.1
     
     # ---- Solve FG ---- 
 
@@ -149,13 +179,17 @@ function forward_then_inverse()
     end
 
     constraint_parameters = (;adjacency_matrix, ωs = ω, αs = α, ρs = ρ) # These parameters work 
-    converged_forward, time_forward, solution_forward = 
+    converged_forward, time_forward, solution_forward, model_forward = 
         solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, constraint_parameters, T;
         init = (; s = 1.5),
         solver = Ipopt.Optimizer, 
         solver_attributes = (; max_wall_time = 20.0, print_level = 5),
         μ
         )
+    player_weights = [
+            (; state_goal = weights[1, 1], control_Δv = weights[1, 2]),
+            (; state_goal = weights[2, 1], control_Δv = weights[2, 2]),
+        ]
 
     # ---- Inverse ----
 
@@ -174,14 +208,13 @@ function forward_then_inverse()
     end
 
     y = (;x = solution_forward.x, u = solution_forward.u)
-    # adjacency_matrix = zeros(Bool, n_players, n_players)
-    converged, solution_inverse = solve_inverse_game(
+    converged, solution_inverse, model_inverse = solve_inverse_game(
             InverseHyperplaneSolver(),
             y, 
             adjacency_matrix;
             control_system,
             player_cost_models,
-            init = (;ωs = ω, αs = α, ρs = ρ, solution_forward...),
+            init = (;ωs = ω, αs = α, ρs = ρ, player_weights, solution_forward...),
             solver = Ipopt.Optimizer,
             solver_attributes = (; max_wall_time = 60.0, print_level = 5),
             cmin = 1e-5,
@@ -263,7 +296,7 @@ function infer_and_check(data_states, data_inputs)
 
     adjacency_matrix = [false true;
                         false false]
-    μs = [1e-5]
+    μs = [1e-1]
     
     # Load data 
     y = (;x = data_states, u = data_inputs)
@@ -300,7 +333,7 @@ function infer_and_check(data_states, data_inputs)
             adjacency_matrix;
             control_system,
             player_cost_models,
-            init = (;s = 1.5),
+            # init = (;s = 1.5),
             solver = Ipopt.Optimizer,
             solver_attributes = (; max_wall_time = 60.0, print_level = 5),
             cmin = 1e-5,
@@ -308,7 +341,7 @@ function infer_and_check(data_states, data_inputs)
             μ = μs[1],
         )
 
-    # Feed previous solution as initial guess. Should converge almost immediately
+    # Warm start solver with previous soln at solve agian. Should converge almost immediately
     converged_2, solution_2, opt_model_2 = solve_inverse_game(
             InverseHyperplaneSolver(),
             y, 
@@ -317,7 +350,7 @@ function infer_and_check(data_states, data_inputs)
             player_cost_models,
             init = solution_1, 
             solver = Ipopt.Optimizer,
-            solver_attributes = (; max_wall_time = 20.0, print_level = 5),
+            solver_attributes = (; max_wall_time = 20.0, print_level = 5, warm_start_init_point = :yes),
             cmin = 1e-5,
             ρmin,
             μ = μs[1],

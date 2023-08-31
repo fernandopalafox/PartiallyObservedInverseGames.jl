@@ -221,20 +221,19 @@ function solve_game(
 
             # Extract relevant lms and slacks
             λ_i_couples = λ_i[player_couple_list[player_idx], :]
-            s_couples = s[player_couple_list[player_idx], :]
+            # s_couples = s[player_couple_list[player_idx], :]
             dhdx_container = []
 
             for (couple_idx_local, couple) in enumerate(couples[player_couple_list[player_idx]])
                 couple_idx_global = player_couple_list[player_idx][couple_idx_local]
 
                 # Extract relevant parameters
-                parameter_idx = player_couple_list[player_idx][couple_idx_local]
                 parameters = (;
                     couple,
-                    θ = θs[parameter_idx],
-                    ω = ωs[parameter_idx],
-                    α = αs[parameter_idx],
-                    ρ = ρs[parameter_idx],
+                    θ = θs[couple_idx_global],
+                    ω = ωs[couple_idx_global],
+                    α = αs[couple_idx_global],
+                    ρ = ρs[couple_idx_global],
                     T_offset = 0,
                 )
 
@@ -265,14 +264,14 @@ function solve_game(
                     )
 
                     # Enforce shared constraint feasibility
-                    @constraint(opt_model, [t = 2:T], hs(t) - s_couples[couple_idx_local, t] == 0)
+                    @constraint(opt_model, [t = 2:T], hs(t) - s[couple_idx_global, t] == 0)
                     push!(used_couples, couple_idx_global) # Add constraint to list of used constraints
                     println("   Adding shared constraint feasiblity for couple $couple_idx_global: $couple")
 
                     # ∇ₛL = -μ * s⁻¹ - λ_i = 0
                     s_couple_inv = @variable(opt_model, [t = 2:T])
-                    @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s_couples[couple_idx_local, t])
-                    @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_i_couples[couple_idx_local, t] == 0)
+                    @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s[couple_idx_global, t])
+                    @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_i[couple_idx_global, t] == 0)
                 end   
             end
             dhdx = vcat(dhdx_container...)

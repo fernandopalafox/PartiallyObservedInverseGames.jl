@@ -29,17 +29,18 @@ scale = 1
 t_real = 10.0
 t_real_activate_goalcost = t_real
 T_activate_goalcost = Int(t_real_activate_goalcost / ΔT)
+# T_activate_goalcost = Int(T_activate_goalcost/2)
 
-v_init = 0.1
-os = deg2rad(45) # init. angle offset
+v_init = 0.5
+os = deg2rad(90) # init. angle offset
 max_wall_time = 60.0
 
 # Satellite parameters
 m   = 100.0 # kg
 r₀ = (400 + 6378.137) # km
-μ  = 398600.4418 # km^3/s^2
+grav_parameter  = 398600.4418 # km^3/s^2
 
-n = sqrt(μ/(r₀^3)) # rad/s
+n = sqrt(grav_parameter/(r₀^3)) # rad/s
 
 # Setup system
 control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m) for _ in 1:n_players])
@@ -53,9 +54,8 @@ x0 = vcat(
     ]...,
 )
 
-# Costs
-weights = [0.0 1.0 0.00001;
-           0.0 1.0 0.00001];       
+# Costs 
+weights = repeat([0.0001 10.0 0.0001], outer = n_players) # works well enough 
 
 T = Int(t_real / ΔT)
 player_cost_models = map(enumerate(as)) do (ii, a)
@@ -89,9 +89,10 @@ animate_trajectory(
         kkt_solution.x, 
         (;
             ΔT = ΔT,
-            title = "satellites 2d", 
+            title = "fwd_game_2d_3p", 
             n_players, 
-            n_states_per_player = 4
+            n_states_per_player = 4,
+            goals = [player_cost_models[player].goal_position for player in 1:n_players]
         );
         fps = 10
     )

@@ -24,14 +24,14 @@ include("utils/misc.jl")
 let 
 
 ΔT = 0.1
-n_players = 2
+n_players = 3
 scale = 1
 t_real = 10.0
 t_real_activate_goalcost = t_real
 T_activate_goalcost = Int(t_real_activate_goalcost / ΔT)
 
-v_init = 0.1
-os = deg2rad(45) # init. angle offset
+v_init = 0.5
+os = deg2rad(90) # init. angle offset
 max_wall_time = 60.0
 
 # Satellite parameters
@@ -45,7 +45,7 @@ n = sqrt(grav_param/(r₀^3)) # rad/s
 control_system = TestDynamics.ProductSystem([TestDynamics.Satellite3D(ΔT, n, m) for _ in 1:n_players])
 as = [2*pi/n_players * (i-1) for i in 1:n_players] # angles
 as = [a > pi ? a - 2*pi : a for a in as]
-zs = [1.0, 1.0]
+zs = [1.0, 1.0, 1.0]
 
 x0 = vcat(
     [
@@ -55,8 +55,7 @@ x0 = vcat(
 )
 
 # Costs
-weights = [0.0 1.0 0.00001;
-           0.0 1.0 0.00001];       
+weights = repeat([0.0 10.0 0.0001], outer = n_players) # works well enough      
 
 T = Int(t_real / ΔT)
 player_cost_models = map(enumerate(as)) do (ii, a)
@@ -82,46 +81,33 @@ _, kkt_solution, _ =
 
 
 # ---- Save trajectory to file ----
-CSV.write("data/f_3d_s.csv", DataFrame(kkt_solution.x, :auto), header = false)
-CSV.write("data/f_3d_c.csv", DataFrame(kkt_solution.u, :auto), header = false)
+CSV.write("data/f_3d_3p_s.csv", DataFrame(kkt_solution.x, :auto), header = false)
+CSV.write("data/f_3d_3p_c.csv", DataFrame(kkt_solution.u, :auto), header = false)
 
 # ---- Animation trajectories ----
 animate_trajectory(
-        vcat(kkt_solution.x[1:4, :], kkt_solution.x[7:10, :]), # dirt hack 
+        vcat(kkt_solution.x[1:4, :], kkt_solution.x[7:10, :], kkt_solution.x[13:16, :]), # dirty hack 
         (;
             ΔT = ΔT,
-            title = "satellites_3D_xy", 
+            title = "satellites_xy", 
             n_players, 
-            n_states_per_player = 4
+            n_states_per_player = 4,
+            goals = [player_cost_models[player].goal_position for player in 1:n_players]
         );
         fps = 10
     )
 
 
 # Print maximum control effort
-println("Maximum control effort: ", maximum(abs.(kkt_solution.u)))
-
-# Plot controls
-# plot(kkt_solution.u', label = ["1_ux" "1_uy" "2_ux" "2_uy"], xlabel = "t", ylabel = "u", title = "Controls")
-# plot(kkt_solution.x[[3, 9], :]', xlabel = "x", ylabel = "z", label = ["1" "2"], title = "z")
-# plot3d(
-#     [kkt_solution.x[1 + 6 * (i - 1), :] for i in 1:n_players],
-#     [kkt_solution.x[2 + 6 * (i - 1), :] for i in 1:n_players],
-#     [kkt_solution.x[3 + 6 * (i - 1), :] for i in 1:n_players],
-#     xlabel = "x",
-#     ylabel = "y",
-#     zlabel = "z",
-#     title = "3D trajectory",
-# )
-# Main.@infiltrate
 display_3D_trajectory(
     kkt_solution.x,
     (;
-        n_players = 2,
+        n_players = n_players,
         n_states_per_player = 6,
-        player_goals = [player_cost_models[player].goal_position for player in 1:n_players],
+        goals = [player_cost_models[player].goal_position for player in 1:n_players],
     );
     title = "3D_trajectory",
+    filename = "forward_data.gif"
 )
 
 

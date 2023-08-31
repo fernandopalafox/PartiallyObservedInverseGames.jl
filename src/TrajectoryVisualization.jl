@@ -1,11 +1,12 @@
 module TrajectoryVisualization
 using VegaLite: VegaLite
-using Plots: plot, palette, @animate
-# using GLMakie: lines, Axis3, Point3f, record, set_theme!, theme_black, Observable, Figure, hidespines!, mesh!, hidezdecorations!, notify, scatter!, lines!, RGBA
+using Plots
+# using GLMakie: lines, Axis3, Point3f, record, set_theme!, theme_black, Observable, Figure, hidespines!, mesh!, hidezdecorations!, notify, scatter!, lines!, Makie.RGBA
 using GLMakie
 using GeometryBasics: Cylinder, Circle, Polygon, mesh
 import GeometryBasics
 using DataStructures: CircularBuffer
+using LinearAlgebra: norm
 
 export visualize_trajectory, visualize_trajectory_batch
 
@@ -171,7 +172,7 @@ function visualize_rotating_hyperplane(states, params)
     gif(anim, fps = 5, "rotating_hyperplane_"*params.title*".gif")
 end    
 
-function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5) 
+function visualize_rotating_hyperplanes(states, params; title = "", koz = true, fps = 5) 
 
     # Useful stuff
     position_indices = vcat(
@@ -214,19 +215,19 @@ function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5)
     # Animation of trajectory 
     anim = @animate for i = 1:T
         # Plot trajectories
-        plot(; legend = false, title = params.title, xlabel = "x", ylabel = "y", size = (500, 500))
-        plot!(
+        Plots.plot(; legend = false, title = title, xlabel = "x", ylabel = "y", size = (500, 500))
+        Plots.plot!(
             [states[position_indices[player, 1], 1:i] for player in 1:(params.n_players)],
             [states[position_indices[player, 2], 1:i] for player in 1:(params.n_players)]
         )
-        scatter!(
+        Plots.scatter!(
             [states[position_indices[player, 1], i] for player in 1:(params.n_players)],
             [states[position_indices[player, 2], i] for player in 1:(params.n_players)],
             markersize = 5,
             color = colors,
         )
         # plot goals from params info with an x
-        scatter!(
+        Plots.scatter!(
             [params.goals[player][1] for player in 1:(params.n_players)],
             [params.goals[player][2] for player in 1:(params.n_players)],
             markersize = 5,
@@ -238,7 +239,7 @@ function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5)
         for (couple_idx, couple)  in enumerate(couples)
             if koz
                 # Plot KoZs around hyperplane owner
-                plot!(
+                Plots.plot!(
                     [states[position_indices[couple[2], 1], i] + params.ρs[couple_idx] * cos(θ) for θ in range(0,stop=2π,length=100)], 
                     [states[position_indices[couple[2], 2], i] + params.ρs[couple_idx] * sin(θ) for θ in range(0,stop=2π,length=100)], 
                     color = colors[couple[1]], 
@@ -251,7 +252,7 @@ function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5)
             ni =
                 params.ρs[couple_idx] *
                 n(i, θs[couple_idx], params.αs[couple_idx], params.ωs[couple_idx])
-            plot!(
+            Plots.plot!(
                 [states[position_indices[couple[2], 1], i], states[position_indices[couple[2], 1], i] + ni[1]],
                 [states[position_indices[couple[2], 2], i], states[position_indices[couple[2], 2], i] + ni[2]],
                 arrow = true,
@@ -260,17 +261,17 @@ function visualize_rotating_hyperplanes(states, params; koz = true, fps = 5)
             # Plot hyperplane 
             hyperplane_domain = 10*range(domain[1],domain[2],100)
             p = states[position_indices[couple[2], 1:2], i] + ni
-            plot!(hyperplane_domain .+ p[1],
+            Plots.plot!(hyperplane_domain .+ p[1],
                 [-ni[1]/ni[2]*x + p[2] for x in hyperplane_domain],
                 color = colors[couple[1]],
             )
         end
 
         # Set domain
-        plot!(xlims = domain,
+        Plots.plot!(xlims = domain,
               ylims = domain)
     end
-    gif(anim, fps = fps, "rotating_hyperplanes_"*params.title*".gif")
+    gif(anim, fps = fps, "rotating_hyperplanes_"*title*".gif")
 end    
 
 function visualize_obs_pred(states, T_obs, params; koz = true, fps = 5) 
@@ -396,18 +397,19 @@ function animate_trajectory(states, params; fps = 5)
     )
 
     # Plot limits
-    x_domain = extrema(states[position_indices[:, 1], :]) .+ (-0.01, 0.01)
-    y_domain = extrema(states[position_indices[:, 2], :]) .+ (-0.01, 0.01)
+    extra = 0.1 
+    x_domain = extrema(states[position_indices[:, 1], :]) .+ (-extra, extra)
+    y_domain = extrema(states[position_indices[:, 2], :]) .+ (-extra, extra)
     domain = [minimum([x_domain[1], y_domain[1]]), maximum([x_domain[2], y_domain[2]])]
 
     T = size(states, 2)
     colors = palette(:default)[1:(params.n_players)]
 
     # Animation of trajectory 
-    anim = @animate for i in 1:T
+    anim = Plots.@animate for i in 1:T
 
         # Plot trajectories
-        plot(
+        Plots.plot(
             [states[position_indices[player, 1], 1:i] for player in 1:(params.n_players)],
             [states[position_indices[player, 2], 1:i] for player in 1:(params.n_players)],
             legend = false,
@@ -418,16 +420,198 @@ function animate_trajectory(states, params; fps = 5)
             xlims = domain,
             ylims = domain,
         )
-        scatter!(
+        Plots.scatter!(
             [states[position_indices[player, 1], i] for player in 1:(params.n_players)],
             [states[position_indices[player, 2], i] for player in 1:(params.n_players)],
             markersize = 5,
             color = colors,
         )
+        # Plot goals    
+        Plots.scatter!(
+            [params.goals[player][1] for player in 1:(params.n_players)],
+            [params.goals[player][2] for player in 1:(params.n_players)],
+            markersize = 10,
+            marker = :star4,
+            color = colors,
+        )
+
         # Set domain
-        plot!(xlims = domain, ylims = domain)
+        Plots.plot!(xlims = domain, ylims = domain)
     end
-    gif(anim, fps = fps, params.title * ".gif")
+    Plots.gif(anim, fps = fps, params.title * ".gif")
+end
+
+"Plot trajectory comparison in two-dimensions, since this is where hyperplanes live"
+function trajectory_comparison(states_1, states_2, parameters; title = "Forward Game Trajectory Comparison", filename = "comparison.png")
+
+    timesteps = size(states_1, 2)
+    position_indices = vcat(
+            [[1 2 3] .+ (player - 1) * parameters.n_states_per_player for player in 1:(parameters.n_players)]...,
+        )
+
+    extra = maximum(parameters.ρs) + 0.05
+    x_domain = extrema(states_1[position_indices[:, 1], :]) .+ (-extra, extra)
+    y_domain = extrema(states_1[position_indices[:, 2], :]) .+ (-extra, extra)
+    # xy_domain = [minimum([x_domain[1], y_domain[1]]), maximum([x_domain[2], y_domain[2]])]
+
+    set_theme!()
+    fig = Figure(); 
+
+    # Setup grids 
+    panel_1 = fig[1, 1] = GridLayout()
+    panel_2 = fig[1, 2] = GridLayout()
+    axis_1 = Axis(
+        panel_1[1, 1],
+        limits = (x_domain, y_domain),
+        xlabel = "Position x [m]",
+        ylabel = "Position y [m]",
+        title = "KKT",
+        xgridvisible = false,
+        ygridvisible = false,
+    )
+    axis_2 = Axis(
+        panel_2[1, 1],
+        limits = (x_domain, y_domain),
+        xlabel = "Position x [m]",
+        title = "Our method",
+        xgridvisible = false,
+        ygridvisible = false,
+    )
+    hideydecorations!(axis_2)
+    
+    
+
+    # For every player, at every point, measure the closest approach to any other player
+    # Every player should be left with a vector of length horizon corresponding to the closest approach to every other player
+    # Color is inversely proportional to this distance
+    
+    function compute_player_colors(states)
+        # Create an empty vector of vectors to store the colors
+        player_colors = Vector{Vector{Float64}}(undef, 0) 
+
+        for idx_ego in 1:parameters.n_players
+            min_distance_to_other = ones(timesteps) .* Inf
+            pos_ego = states[position_indices[idx_ego, 1:2], :]
+            for idx_other in setdiff(1:parameters.n_players, idx_ego)
+                pos_other = states[position_indices[idx_other, 1:2], :]
+                distance_to_other = map(norm, eachcol(pos_ego .- pos_other))
+                min_distance_to_other = vec(minimum(hcat(min_distance_to_other, distance_to_other), dims = 2)) # In Julia 1.9 norm has dim arg 
+            end
+            # Print player i minimum distance to others
+            println("   Player $idx_ego min distance to others: ", minimum(min_distance_to_other))
+            # push!(player_colors, 1 ./ min_distance_to_other) 
+            push!(player_colors, min_distance_to_other) 
+        end
+        player_colors
+    end
+    player_colors_1 = compute_player_colors(states_1)
+    player_colors_2 = compute_player_colors(states_2)
+
+    min_player_colors_1 = minimum([minimum(player_colors_1[player]) for player in 1:(parameters.n_players)])
+    min_player_colors_2 = minimum([minimum(player_colors_2[player]) for player in 1:(parameters.n_players)])
+    max_player_colors_1 = maximum([maximum(player_colors_1[player]) for player in 1:(parameters.n_players)])
+    max_player_colors_2 = maximum([maximum(player_colors_2[player]) for player in 1:(parameters.n_players)])
+
+    # Normalize colors by the maximum value between the two data sets 
+    # max_color_1 = maximum([maximum(player_colors_1[player]) for player in 1:(parameters.n_players)])
+    # max_color_2 = maximum([maximum(player_colors_2[player]) for player in 1:(parameters.n_players)])
+    # max_color = maximum([max_color_1, max_color_2])
+    # player_colors_1 = [player_colors_1[player] ./ max_color for player in 1:(parameters.n_players)]
+    # player_colors_2 = [player_colors_2[player] ./ max_color for player in 1:(parameters.n_players)]
+
+    # Plot first set of trajectories 
+    # :cool 
+    # :RdYlGn_11
+    track_color_symbol = :RdYlGn_11
+    track_color_gradient = cgrad(track_color_symbol)
+    track_width = 5
+    marker_colors = palette(:default)[1:parameters.n_players]
+    for player in 1:parameters.n_players 
+        lines!(
+            axis_1,
+            states_1[position_indices[player, 1:2], :];
+            linewidth = track_width,
+            color = [track_color_gradient[z] for z in player_colors_1[player]],
+            # label = "KKT trajectory"
+        )
+
+        # Plot player goals 
+        Makie.scatter!(
+            axis_1,
+            Point2f(parameters.goals[player]);
+            markersize = 20,
+            marker = :star4,
+            color = marker_colors[player],
+            label = "Player goal"
+        )
+
+        # Plot player start
+        Makie.scatter!(
+            axis_1,
+            Point2f(states_1[position_indices[player, 1:2], 1]);
+            markersize = 20,
+            marker = :circle,
+            color = marker_colors[player],
+            label = "Player start"
+        )
+    end   
+
+    for player in 1:parameters.n_players 
+        lines!(
+            axis_2,
+                states_2[position_indices[player, 1:2], :];
+                linewidth = track_width,
+                color = [track_color_gradient[z] for z in player_colors_2[player]],
+                # label = "Hyperplane trajectory"
+            )
+
+        # Plot player goals 
+        Makie.scatter!(
+            axis_2,
+            Point2f(parameters.goals[player]);
+            markersize = 20,
+            marker = :star4,
+            color = marker_colors[player],
+            label = "Player goal"
+        )
+
+        # Plot player start
+        Makie.scatter!(
+            axis_2,
+            Point2f(states_1[position_indices[player, 1:2], 1]);
+            markersize = 20,
+            marker = :circle,
+            color = marker_colors[player],
+            label = "Player start"
+        )
+    end   
+
+    # Colorbar
+    Colorbar(
+        fig[1, 3],
+        limits = (
+            minimum([min_player_colors_1, min_player_colors_2]),
+            maximum([max_player_colors_1, max_player_colors_2]),
+        ),
+        colormap = track_color_symbol,
+        label = "closest approach",
+    )
+
+    # legend
+    Legend(
+        fig[2, 1:2],
+        axis_1,
+        framevisible = false,
+        merge = true,
+        unique = true,
+        orientation = :horizontal,
+        valign = :top,
+        tellwidth = false, 
+        tellheight = true
+    )
+
+    save(filename, fig)
+    display(fig)
 end
 
 function display_3D_trajectory(states, parameters; title = "title", filename = "3D_trajectory.gif", hyperplane = false)
@@ -436,7 +620,11 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
         [[1 2 3] .+ (player - 1) * parameters.n_states_per_player for player in 1:(parameters.n_players)]...,
     )
 
-    extra = maximum(parameters.ρs) + 0.05
+    if hyperplane
+        extra = maximum(parameters.ρs) + 0.05
+    else
+        extra = 0.1
+    end
     x_domain = extrema(states[position_indices[:, 1], :]) .+ (-extra, extra)
     y_domain = extrema(states[position_indices[:, 2], :]) .+ (-extra, extra)
     z_domain = extrema(states[position_indices[:, 3], :]) .+ (-extra, extra)
@@ -453,105 +641,106 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
         ) for i in 1:(parameters.n_players)
     ]
 
-    # KoZ
-    KoZs = [
-        Observable(
-            Cylinder(
-                Point3f([states[position_indices[couple[2], 1:2], 1]; z_domain[1]]),
-                Point3f([states[position_indices[couple[2], 1:2], 1]; z_domain[2]]),
-                Float32(ρ),
-            ),
-        ) for (couple, ρ) in zip(parameters.couples, parameters.ρs)
-    ]
-    
-    # KoZ projection 
-    function draw_koz_projection(center, radius)
-        hcat(
-            [center[1] + radius * cos(θ) for θ in range(0, stop = 2π, length = 100)],
-            [center[2] + radius * sin(θ) for θ in range(0, stop = 2π, length = 100)],
-            z_domain[1] .* ones(100),
-        )
-    end
-    KoZ_projections = [
-        Observable(draw_koz_projection(states[position_indices[couple[2], 1:2], 1], ρ))
-        for (couple, ρ) in zip(parameters.couples, parameters.ρs)
-    ]
-
-    # Hyperplane 
-    θs = zeros(length(parameters.couples))
-    for (couple_idx, couple) in enumerate(parameters.couples)
-        idx_ego   = (1:2) .+ (couple[1] - 1)*parameters.n_states_per_player
-        idx_other = (1:2) .+ (couple[2] - 1)*parameters.n_states_per_player
-        x_ego   = states[idx_ego,1]
-        x_other = states[idx_other,1]
-        x_diff  = x_ego - x_other
-        θ = atan(x_diff[2], x_diff[1])
-
-        θs[couple_idx] = θ
-    end
-    hyperplane_x = collect(range(xy_domain[1], xy_domain[2], 1000))
-    function n(t, θ, α, ω)
-        [cos(θ + α + ω * (t - 1) * parameters.ΔT), sin(θ + α + ω * (t - 1) * parameters.ΔT)]
-    end
-    function draw_hyperplane_projection(i, couple, couple_idx)
-        ni = parameters.ρs[couple_idx] * n(i, θs[couple_idx], parameters.αs[couple_idx], parameters.ωs[couple_idx])
-        p = states[position_indices[couple[2], 1:2], i] + ni
-        hyperplane_y = [-ni[1] / ni[2] * (x - p[1]) + p[2] for x in hyperplane_x]
-        
-        idx = findall((hyperplane_y .> xy_domain[1]) .* (hyperplane_y .< xy_domain[2]))
-        if length(idx) < 2 # Case where ni[2] is close to zero
-            hcat(p[1] .* ones(length(hyperplane_x)), 
-                hyperplane_x, 
-                z_domain[1] .* ones(length(hyperplane_x))
-                )
-        else
+    if hyperplane
+        # KoZ
+        KoZs = [
+            Observable(
+                Cylinder(
+                    Point3f([states[position_indices[couple[2], 1:2], 1]; z_domain[1]]),
+                    Point3f([states[position_indices[couple[2], 1:2], 1]; z_domain[2]]),
+                    Float32(ρ),
+                ),
+            ) for (couple, ρ) in zip(parameters.couples, parameters.ρs)
+        ]
+        # KoZ projection 
+        function draw_koz_projection(center, radius)
             hcat(
-                hyperplane_x[idx], 
-                hyperplane_y[idx],
-                z_domain[1] .* ones(length(idx)),
+                [center[1] + radius * cos(θ) for θ in range(0, stop = 2π, length = 100)],
+                [center[2] + radius * sin(θ) for θ in range(0, stop = 2π, length = 100)],
+                z_domain[1] .* ones(100),
             )
         end
-    end
-    hyperplanes_xy = [
-        Observable(draw_hyperplane_projection(1, couple, couple_idx))
+        KoZ_projections = [
+            Observable(draw_koz_projection(states[position_indices[couple[2], 1:2], 1], ρ))
+            for (couple, ρ) in zip(parameters.couples, parameters.ρs)
+        ]
+
+        # Hyperplane 
+        θs = zeros(length(parameters.couples))
         for (couple_idx, couple) in enumerate(parameters.couples)
-    ]
+            idx_ego   = (1:2) .+ (couple[1] - 1)*parameters.n_states_per_player
+            idx_other = (1:2) .+ (couple[2] - 1)*parameters.n_states_per_player
+            x_ego   = states[idx_ego,1]
+            x_other = states[idx_other,1]
+            x_diff  = x_ego - x_other
+            θ = atan(x_diff[2], x_diff[1])
 
-    function draw_hyperplane(i, couple, couple_idx)
-        # Hyperplane projection 
-        hyperplane_xy = draw_hyperplane_projection(i, couple, couple_idx)
-
-        # Hyperplane normal 
-        ni = n(i, θs[couple_idx], parameters.αs[couple_idx], parameters.ωs[couple_idx])
-
-        # Find min and max x
-        _, x_min_idx = findmin(hyperplane_xy[:,1])
-        _, x_max_idx = findmax(hyperplane_xy[:,1])
-        if x_min_idx == x_max_idx
-            _, x_max_idx = findmax(hyperplane_xy[:,2])
+            θs[couple_idx] = θ
         end
-
-        thickness = 0.01
-        # Create hyperplane vertices
-        # with thickness 
-        face_vertices = 
-        [
-            hyperplane_xy[x_min_idx, 1] hyperplane_xy[x_min_idx, 2] z_domain[1];
-            hyperplane_xy[x_max_idx, 1] hyperplane_xy[x_max_idx, 2] z_domain[1];
-            hyperplane_xy[x_max_idx, 1] hyperplane_xy[x_max_idx, 2] z_domain[2];
-            hyperplane_xy[x_min_idx, 1] hyperplane_xy[x_min_idx, 2] z_domain[2];
+        hyperplane_x = collect(range(xy_domain[1], xy_domain[2], 1000))
+        function n(t, θ, α, ω)
+            [cos(θ + α + ω * (t - 1) * parameters.ΔT), sin(θ + α + ω * (t - 1) * parameters.ΔT)]
+        end
+        function draw_hyperplane_projection(i, couple, couple_idx)
+            ni = parameters.ρs[couple_idx] * n(i, θs[couple_idx], parameters.αs[couple_idx], parameters.ωs[couple_idx])
+            p = states[position_indices[couple[2], 1:2], i] + ni
+            hyperplane_y = [-ni[1] / ni[2] * (x - p[1]) + p[2] for x in hyperplane_x]
+            
+            idx = findall((hyperplane_y .> xy_domain[1]) .* (hyperplane_y .< xy_domain[2]))
+            if length(idx) < 2 # Case where ni[2] is close to zero
+                hcat(p[1] .* ones(length(hyperplane_x)), 
+                    hyperplane_x, 
+                    z_domain[1] .* ones(length(hyperplane_x))
+                    )
+            else
+                hcat(
+                    hyperplane_x[idx], 
+                    hyperplane_y[idx],
+                    z_domain[1] .* ones(length(idx)),
+                )
+            end
+        end
+        hyperplanes_xy = [
+            Observable(draw_hyperplane_projection(1, couple, couple_idx))
+            for (couple_idx, couple) in enumerate(parameters.couples)
         ]
-        [
-            face_vertices
-            face_vertices .+ thickness .* [ni[1] ni[2] 0]
+
+        function draw_hyperplane(i, couple, couple_idx)
+            # Hyperplane projection 
+            hyperplane_xy = draw_hyperplane_projection(i, couple, couple_idx)
+    
+            # Hyperplane normal 
+            ni = n(i, θs[couple_idx], parameters.αs[couple_idx], parameters.ωs[couple_idx])
+    
+            # Find min and max x
+            _, x_min_idx = findmin(hyperplane_xy[:,1])
+            _, x_max_idx = findmax(hyperplane_xy[:,1])
+            if x_min_idx == x_max_idx
+                _, x_max_idx = findmax(hyperplane_xy[:,2])
+            end
+    
+            thickness = 0.01
+            # Create hyperplane vertices
+            # with thickness 
+            face_vertices = 
+            [
+                hyperplane_xy[x_min_idx, 1] hyperplane_xy[x_min_idx, 2] z_domain[1];
+                hyperplane_xy[x_max_idx, 1] hyperplane_xy[x_max_idx, 2] z_domain[1];
+                hyperplane_xy[x_max_idx, 1] hyperplane_xy[x_max_idx, 2] z_domain[2];
+                hyperplane_xy[x_min_idx, 1] hyperplane_xy[x_min_idx, 2] z_domain[2];
+            ]
+            [
+                face_vertices
+                face_vertices .+ thickness .* [ni[1] ni[2] 0]
+            ]
+        end
+        hyperplanes = [
+            Observable(draw_hyperplane(1, couple, couple_idx))
+            for (couple_idx, couple) in enumerate(parameters.couples)
         ]
     end
-    hyperplanes = [
-        Observable(draw_hyperplane(1, couple, couple_idx))
-        for (couple_idx, couple) in enumerate(parameters.couples)
-    ]
-
-    set_theme!(theme_black())
+    
+    set_theme!(theme_light())
     fig = Figure(); display(fig)
     ax = Axis3(
         fig[1, 1],
@@ -577,13 +766,13 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
         )
 
         # Player track
-        track_color = [RGBA(colors[player],(i/tail)^2) for i in 1:length(player_tracks[player][])]
+        track_color = [Makie.RGBA(colors[player],(i/tail)^2) for i in 1:length(player_tracks[player][])]
         lines!(ax, player_tracks[player]; linewidth = 2, color = track_color, transparency = true)
 
         # Player goals 
         Makie.scatter!(
             ax,
-            Point3f(parameters.player_goals[player]);
+            Point3f(parameters.goals[player]);
             markersize = 15,
             marker = :star4,
             color = colors[player],
@@ -597,11 +786,11 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
                 @lift(Point3f([$(player_points[player])[1:2]; z_domain[1]]));
                 markersize = 12.5,
                 marker = :utriangle,
-                color = RGBA(colors[player], 0.3),
+                color = Makie.RGBA(colors[player], 0.3),
             )
 
             # Player track
-            track_color = [RGBA(colors[player],0.3*(i/tail)^2) for i in 1:length(player_tracks[player][])]
+            track_color = [Makie.RGBA(colors[player],0.3*(i/tail)^2) for i in 1:length(player_tracks[player][])]
             lines!(
                 ax,
                 @lift([
@@ -615,10 +804,10 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
             # Player goals 
             Makie.scatter!(
                 ax,
-                Point3f([parameters.player_goals[player][1:2]; z_domain[1]]);
+                Point3f([parameters.goals[player][1:2]; z_domain[1]]);
                 markersize = 12.5,
                 marker = :star4,
-                color = RGBA(colors[player], 0.3),
+                color = Makie.RGBA(colors[player], 0.3),
             )
         end
     end
@@ -629,16 +818,16 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
             mesh!(
                 ax,
                 KoZs[couple_idx];
-                color = RGBA(colors[couple[2]], 0.1),
+                color = Makie.RGBA(colors[couple[2]], 0.1),
                 transparency = true,
                 shading = true,
             )
 
             # Projection of KoZs
-            lines!(ax, KoZ_projections[couple_idx], color = RGBA(colors[couple[2]], 0.25))
+            lines!(ax, KoZ_projections[couple_idx], color = Makie.RGBA(colors[couple[2]], 0.25))
 
             # Hyperplanes on xy
-            lines!(ax, hyperplanes_xy[couple_idx], color = RGBA(colors[couple[2]], 0.25))
+            lines!(ax, hyperplanes_xy[couple_idx], color = Makie.RGBA(colors[couple[2]], 0.25))
 
             # Hyperplanes in 3D
             mesh!(
@@ -658,7 +847,7 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
                     4 1 5 # bottom bottom
                     4 5 8 # bottom top
                 ];
-                color = RGBA(colors[couple[2]], 0.15),
+                color = Makie.RGBA(colors[couple[2]], 0.15),
                 transparency = true,
                 shading = true,
             )
@@ -677,29 +866,31 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
                 notify(player_tracks[player])
             end
 
-            for (couple_idx, (couple, ρ)) in enumerate(zip(parameters.couples, parameters.ρs))
-                # Update KoZs 
-                KoZs[couple_idx][] = Cylinder(
-                    Point3f([states[position_indices[couple[2], 1:2], frame]; z_domain[1]]),
-                    Point3f([states[position_indices[couple[2], 1:2], frame]; z_domain[2]]),
-                    Float32(ρ),
-                )
-                notify(KoZs[couple_idx])
+            if hyperplane
+                for (couple_idx, (couple, ρ)) in enumerate(zip(parameters.couples, parameters.ρs))
+                    # Update KoZs 
+                    KoZs[couple_idx][] = Cylinder(
+                        Point3f([states[position_indices[couple[2], 1:2], frame]; z_domain[1]]),
+                        Point3f([states[position_indices[couple[2], 1:2], frame]; z_domain[2]]),
+                        Float32(ρ),
+                    )
+                    notify(KoZs[couple_idx])
 
-                # Update KoZs projection
-                KoZ_projections[couple_idx][] = draw_koz_projection(states[position_indices[couple[2], 1:2], frame], ρ)
-                notify(KoZ_projections[couple_idx])
+                    # Update KoZs projection
+                    KoZ_projections[couple_idx][] = draw_koz_projection(states[position_indices[couple[2], 1:2], frame], ρ)
+                    notify(KoZ_projections[couple_idx])
 
-                # Update hyperplanes on xy
-                hyperplanes_xy[couple_idx][] = draw_hyperplane_projection(frame, couple, couple_idx)
-                notify(hyperplanes_xy[couple_idx])
+                    # Update hyperplanes on xy
+                    hyperplanes_xy[couple_idx][] = draw_hyperplane_projection(frame, couple, couple_idx)
+                    notify(hyperplanes_xy[couple_idx])
 
-                # Update hyperplanes in 3D
-                hyperplanes[couple_idx][] = draw_hyperplane(frame, couple, couple_idx)
-                notify(hyperplanes[couple_idx])
+                    # Update hyperplanes in 3D
+                    hyperplanes[couple_idx][] = draw_hyperplane(frame, couple, couple_idx)
+                    notify(hyperplanes[couple_idx])
+                end
             end
 
-            ax.azimuth[] = pi/3 - (pi/4 - 0.01) * sin(2pi * frame / 380)
+            ax.azimuth[] = pi/3 - (pi/4 - 0.01) * sin(2pi * frame / 380) # ROtate 
             # ax.elevation[] = pi/6 + 0.9 * sin(2pi * frame / 400)
             # ax.azimuth[] = 1.7*pi + pi * (frame - 1) / length(states[1, :])
     end
