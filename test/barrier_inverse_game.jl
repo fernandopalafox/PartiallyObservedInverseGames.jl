@@ -120,42 +120,49 @@ end
 
 # end
 
-
+"Solve a forward game with known hyperplane parameters, and then see if inverse solver can correctly recover them."
 function forward_then_inverse()
-    # Solve a forward game with known weights and hyperplane parameters, and then see if inverse solver can correctly recover them 
+    # TODO: setup as a test 
+
 
     # ---- Parameters ---- 
     
     # Game 
     ΔT = 0.1
     n_players = 2
-    scale = 1
-    t_real = 4.0
-    T_activate_goalcost = 1
-    v_init = 0.5
-    os = deg2rad(90) # init. angle offset
+    n_states_per_player = 4
     
-    # Cost and hyperplane
+    # Initial state
+    v_init = 0.0
+    as = [0.0, pi/2]
+    os = deg2rad(0)
+    
+    # Hyperplane stuff
     adjacency_matrix = [false true;
                         false false]
-    ω = 0.7
+    ω = 0.35
     α = 0.0
-    ρ = 0.1
-    weights = [0.9 0.1;
-               0.9 0.1];    
-    
+    ρ = 0.2
 
+    # Costs function parameters
+    scale = 1
+    t_real = 7.0
+    t_real_activate_goalcost = t_real
+    weights = repeat([0.9 0.1], outer = n_players)
+    
     # Solver  
-    μ = 1e-7
-    ρmin = 0.1
+    μs = [0.0001]
+    ρmin = 0.05
+    max_wall_time = 20.0
+
+    # noise
+    rng = MersenneTwister(0)
+    noise_level = 0.0
     
     # ---- Solve FG ---- 
 
     # System and initial conditions
     control_system = TestDynamics.ProductSystem([TestDynamics.DoubleIntegrator(ΔT) for _ in 1:n_players])
-    as = [2*pi/n_players * (i-1) for i in 1:n_players] # angles
-    as = [a > pi ? a - 2*pi : a for a in as]
-
     x0 = vcat(
     [
         vcat(-scale*unitvector(a), [v_init*cos(a - os), v_init*sin(a - os)]) for
@@ -163,8 +170,9 @@ function forward_then_inverse()
     ]...,
     )
 
-    # Costs
+    # Costs    
     T = Int(t_real / ΔT)
+    T_activate_goalcost = Int(t_real_activate_goalcost / ΔT)
     player_cost_models = map(enumerate(as)) do (ii, a)
         cost_model_p1 = CollisionAvoidanceGame.generate_hyperintegrator_cost(;
             player_idx = ii,
@@ -178,64 +186,134 @@ function forward_then_inverse()
         )
     end
 
-    constraint_parameters = (;adjacency_matrix, ωs = ω, αs = α, ρs = ρ) # These parameters work 
-    converged_forward, time_forward, solution_forward, model_forward = 
-        solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, constraint_parameters, T;
-        init = (; s = 1.5),
-        solver = Ipopt.Optimizer, 
-        solver_attributes = (; max_wall_time = 20.0, print_level = 5),
-        μ
+    # Solve forward game with no hyperplane constraints (just kkt solver)
+    kkt_converged, solution_kkt, kkt_model = solve_game(
+        KKTGameSolver(),
+        control_system,
+        player_cost_models,
+        x0,
+        T;
+        solver = Ipopt.Optimizer,
+        solver_attributes = (; max_wall_time, print_level = 5),
+    )
+
+    # Solve forward game with hyperplane constraints
+    constraint_parameters = (;adjacency_matrix, ωs = ω, αs = α, ρs = ρ) 
+    converged_forward, _, solution_forward, _ = solve_game(
+        KKTGameSolverBarrier(),
+        control_system,
+        player_cost_models,
+        x0,
+        constraint_parameters,
+        T;
+        # init = (; s = 1.5, x = solution_kkt.x, u = solution_kkt.u),
+        init = (; s = 1.5, x = solution_kkt.x),
+        solver = Ipopt.Optimizer,
+        solver_attributes = (; max_wall_time, print_level = 5),
+        μ = μs[1],
+    )
+
+    if converged_forward == false
+        println("Forward game did not converge")
+        visualize_rotating_hyperplanes(     
+            solution_kkt.x,
+            (;
+                ΔT = 0.1,
+                adjacency_matrix = zeros(Bool, n_players, n_players),
+                ωs = constraint_parameters.ωs,
+                αs = constraint_parameters.αs,
+                ρs = constraint_parameters.ρs,
+                n_players = 2,
+                n_states_per_player = 4,
+                goals = [player_cost_models[i].goal_position for i in 1:n_players],
+            );
+            title = "forward_kkt",
+            koz = true,
+            fps = 10.0,
         )
-    player_weights = [
-            (; state_goal = weights[1, 1], control_Δv = weights[1, 2]),
-            (; state_goal = weights[2, 1], control_Δv = weights[2, 2]),
-        ]
+        visualize_rotating_hyperplanes(     
+            solution_forward.x,
+            (;
+                ΔT = 0.1,
+                adjacency_matrix = adjacency_matrix,
+                ωs = constraint_parameters.ωs,
+                αs = constraint_parameters.αs,
+                ρs = constraint_parameters.ρs,
+                n_players = 2,
+                n_states_per_player = 4,
+                goals = [player_cost_models[i].goal_position for i in 1:n_players],
+            );
+            title = "forward_nonconverged",
+            koz = true,
+            fps = 10.0,
+        )
+        return nothing
+    end
+
+    for μ in μs[2:end]
+        converged_forward, _, solution_forward, _ = solve_game(
+            KKTGameSolverBarrier(),
+            control_system,
+            player_cost_models,
+            x0,
+            constraint_parameters,
+            T;
+            init = solution_forward,
+            solver = Ipopt.Optimizer,
+            solver_attributes = (; max_wall_time, print_level = 2),
+            μ,
+        )
+
+        if !converged_forward
+            println("Forward game did not converge at μ = ", μ)
+            break
+        end
+    end
 
     # ---- Inverse ----
 
-    # New cost model w/ dummy weights
-    player_cost_models = map(enumerate(as)) do (ii, a)
-        cost_model_p1 = CollisionAvoidanceGame.generate_hyperintegrator_cost(;
-            player_idx = ii,
-            control_system,
-            T,
-            goal_position = scale*unitvector(a),
-            weights = (; 
-                state_goal      = -1,
-                control_Δv      = -1),
-            T_activate_goalcost,
-        )
-    end
+    # Add noise 
+    y = (;x = solution_forward.x .+ noise_level*randn(rng, size(solution_forward.x)), 
+          u = solution_forward.u .+ noise_level*randn(rng, size(solution_forward.u)))
 
-    y = (;x = solution_forward.x, u = solution_forward.u)
-    converged, solution_inverse, model_inverse = solve_inverse_game(
+    # Solve inverse game
+    converged_inverse, solution_inverse, model_inverse = solve_inverse_game(
             InverseHyperplaneSolver(),
             y, 
             adjacency_matrix;
             control_system,
             player_cost_models,
-            init = (;ωs = ω, αs = α, ρs = ρ, player_weights, solution_forward...),
+            init = (;s = 1.5, x = solution_forward.x, u = solution_forward.u),
             solver = Ipopt.Optimizer,
-            solver_attributes = (; max_wall_time = 60.0, print_level = 5),
+            solver_attributes = (; max_wall_time, print_level = 5),
+            cmin = 1e-5,
+            ρmin,
+            μ = μs[1],
+        )
+    for μ in μs[2:end]
+        converged_inverse, solution_inverse, model_inverse = solve_inverse_game(
+            InverseHyperplaneSolver(),
+            y, 
+            adjacency_matrix;
+            control_system,
+            player_cost_models,
+            init = solution_inverse,
+            solver = Ipopt.Optimizer,
+            solver_attributes = (; max_wall_time, print_level = 5),
             cmin = 1e-5,
             ρmin,
             μ,
         )
 
+        if !converged_inverse
+            println("Inverse game did not converge at μ = ", μ)
+            break
+        end
+    end
+
     # ---- Compare inferred and true parameters ----
-    println("True weights: ", weights)
-    println(
-        "Inferred weights: ",
-        round.(
-            hcat(
-                [solution_inverse.player_weights[i].state_goal for i in 1:n_players],
-                [solution_inverse.player_weights[i].control_Δv for i in 1:n_players],
-            ),
-            digits = 2,
-        ),
-    )
     if length(findall(adjacency_matrix)) > 0
-        println("True parameters: ", ω, " ", α, " ", ρ)
+        println("True parameters:     ", ω, " ", α, " ", ρ)
         println(
             "Inferred parameters: ",
             round(solution_inverse.ωs[1], digits = 2),
@@ -248,6 +326,24 @@ function forward_then_inverse()
 
     # ---- Animation trajectories ----
 
+    # KKT 
+    visualize_rotating_hyperplanes(     
+            solution_kkt.x,
+            (;
+                ΔT = 0.1,
+                adjacency_matrix = zeros(Bool, n_players, n_players),
+                ωs = constraint_parameters.ωs,
+                αs = constraint_parameters.αs,
+                ρs = constraint_parameters.ρs,
+                n_players = 2,
+                n_states_per_player = 4,
+                goals = [player_cost_models[i].goal_position for i in 1:n_players],
+            );
+            title = "forward_kkt",
+            koz = true,
+            fps = 10.0,
+        )
+
     # Forward
     visualize_rotating_hyperplanes(
             solution_forward.x,
@@ -257,11 +353,11 @@ function forward_then_inverse()
                 ωs = constraint_parameters.ωs,
                 αs = constraint_parameters.αs,
                 ρs = constraint_parameters.ρs,
-                title = "forward_hyperplane",
                 n_players = 2,
                 n_states_per_player = 4,
                 goals = [player_cost_models[i].goal_position for i in 1:n_players],
             );
+            title = "forward",
             koz = true,
             fps = 10.0,
         )
@@ -275,15 +371,16 @@ function forward_then_inverse()
                 ωs = solution_inverse.ωs,
                 αs = solution_inverse.αs,
                 ρs = solution_inverse.ρs,
-                title = "inverse_hyperplane",
                 n_players = 2,
                 n_states_per_player = 4,
                 goals = [player_cost_models[i].goal_position for i in 1:n_players],
             );
+            title = "inferred",
             koz = true,
             fps = 10.0,
         )
 
+    return nothing
 end
 
 function infer_and_check(data_states, data_inputs)

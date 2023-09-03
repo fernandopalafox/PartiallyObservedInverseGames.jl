@@ -332,6 +332,14 @@ function solve_game(
     time = @elapsed JuMP.optimize!(opt_model)
     # @info time
     n_couples > 0 ? solution = JuMPUtils.get_values(; x, u, λ_i, λ_e, s) : solution = JuMPUtils.get_values(; x, u, λ_e)
+
+    # Print out difference of solved initial state vs. nominal initial state
+    println("Maximum error in initial state = $(maximum(abs.(solution.x[:,1] - x0[:,1])))")
+
+    # Print difference vectors between solved and nominal initial state
+    println(
+        "Δv = \n    P1 = $(solution.x[3:4,1] - x0[3:4,1])\n    P2 = $(solution.x[7:8,1] - x0[7:8,1])",
+    )
     
     (JuMPUtils.isconverged(opt_model), time, solution, opt_model)
 end

@@ -25,11 +25,12 @@ let
 
 ΔT = 0.1
 n_players = 2
+n_states_per_player = 4
 scale = 1
 t_real = 10.0
 t_real_activate_goalcost = t_real
-T_activate_goalcost = Int(t_real_activate_goalcost / ΔT)
-# T_activate_goalcost = Int(T_activate_goalcost/2)
+
+weights = repeat([0.0001 10.0 0.0001], outer = n_players) # works well enough 
 
 v_init = 0.5
 os = deg2rad(90) # init. angle offset
@@ -54,10 +55,9 @@ x0 = vcat(
     ]...,
 )
 
-# Costs 
-weights = repeat([0.0001 10.0 0.0001], outer = n_players) # works well enough 
-
+# Costs
 T = Int(t_real / ΔT)
+T_activate_goalcost = Int(t_real_activate_goalcost / ΔT)
 player_cost_models = map(enumerate(as)) do (ii, a)
     cost_model_p1 = CollisionAvoidanceGame.generate_integrator_cost(;
         player_idx = ii,
@@ -81,17 +81,17 @@ kkt_converged, kkt_solution, kkt_model =
 
 
 # ---- Save trajectory to file ----
-CSV.write("data/f_2d_s.csv", DataFrame(kkt_solution.x, :auto), header = false)
-CSV.write("data/f_2d_c.csv", DataFrame(kkt_solution.u, :auto), header = false)
+CSV.write("data/f_2d_" * string(n_players) * "p_s.csv", DataFrame(kkt_solution.x, :auto), header = false)
+CSV.write("data/f_2d_" * string(n_players) * "p_c.csv", DataFrame(kkt_solution.u, :auto), header = false)
 
 # ---- Animation trajectories ----
 animate_trajectory(
         kkt_solution.x, 
         (;
             ΔT = ΔT,
-            title = "fwd_game_2d_3p", 
+            title = "fwd_game_2d_"*string(n_players)*"p", 
             n_players, 
-            n_states_per_player = 4,
+            n_states_per_player,
             goals = [player_cost_models[player].goal_position for player in 1:n_players]
         );
         fps = 10

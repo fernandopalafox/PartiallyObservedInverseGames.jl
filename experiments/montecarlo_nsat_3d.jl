@@ -27,36 +27,49 @@ include("utils/misc.jl")
 # Infer hyperplane parameters from expert data 
 function infer()
 
-    # User input
+    # ---- User settings ----
+
+    # Game settings
+    n_players = 6
+    n_states_per_player = 4
+    scale = 1
+
+    # Dynamics settings
+    ΔT = 0.1
     m   = 100.0 # kg
     r₀ = (400 + 6378.137) # km
     grav_param  = 398600.4418 # km^3/s^2
     n = sqrt(grav_param/(r₀^3)) # rad/s
 
-    ΔT = 0.1
-    n_states_per_player = 4
-    scale = 1
-    ρmin = 0.1
-
-    adjacency_matrix = [false true  true;
-                        false false true;
-                        false false false]
-    # adjacency_matrix = [false true  true  true;
-    #                     false false true  true;
-    #                     false false false true;
-    #                     false false false false]
+    # Inverse game parameters
+    ρmin = 0.05
     μs = [1e-6]
+
+    # Solver settings 
+    max_wall_time = 180.0
+
+    # Function to compute adjacency_matrix based on number of players. 
+    # This is a boolean matrix with trues above the diagonal as seen in the above examples.
+    adjacency_matrix = zeros(Bool, n_players, n_players)
+    for i in 1:n_players
+        for j in 1:n_players
+            if i < j
+                adjacency_matrix[i, j] = true
+            end
+        end
+    end
+
+    # ---- Solve ----
     
     # Load data 
-    data_states   = Matrix(CSV.read("data/f_2d_3p_s.csv", DataFrame, header = false))
-    data_inputs   = Matrix(CSV.read("data/f_2d_3p_c.csv", DataFrame, header = false))
+    data_states   = Matrix(CSV.read("data/f_2d_"*string(n_players)*"p_s.csv", DataFrame, header = false))
+    data_inputs   = Matrix(CSV.read("data/f_2d_"*string(n_players)*"p_c.csv", DataFrame, header = false))
     y = (;x = data_states, u = data_inputs)
 
     T = size(data_states, 2)
     T_activate_goalcost = T
 
     # Setup control system 
-    n_players = size(adjacency_matrix, 2)
     control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m) for _ in 1:n_players])
 
     # Presumed cost system with dummy variables
@@ -85,13 +98,14 @@ function infer()
             player_cost_models,
             init = (;s = 1.5, x = data_states, u = data_inputs),
             solver = Ipopt.Optimizer,
-            solver_attributes = (; max_wall_time = 60.0, print_level = 5),
+            solver_attributes = (; max_wall_time, print_level = 5),
             cmin = 1e-5,
             ρmin,
             μ = μs[1],
         )
 
-    # Display 3d trajectory
+    
+    # Plot 2d
     plot_parameters = 
         (;
             n_players = n_players,
@@ -104,28 +118,19 @@ function infer()
             ρs = solution_inverse.ρs,
             ΔT = ΔT
         )
-    # Plot 2d
     visualize_rotating_hyperplanes(
-        # vcat(solution_inverse.x[1:4, :], solution_inverse.x[7:10, :], solution_inverse.x[13:16, :]), # dirt hack 
         solution_inverse.x,
         plot_parameters;
+        title = string(n_players)*"p",
         koz = true,
         fps = 10.0,
     )
-    # # Plot 23d
-    # display_3D_trajectory(
-    #     solution_inverse.x,
-    #     plot_parameters
-    #     ;
-    #     title = "3D_hyperplane",
-    #     hyperplane = true
-    # )
 
     solution_inverse, plot_parameters
 end
 
 # Monte Carlo simulation
-function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wall_time = 10.0, visualize = false)
+function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 0.0001, max_wall_time = 60.0, visualize = false)
 
     # Tuneable parameters
     scale = 1.0
@@ -144,7 +149,7 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
 
     # Useful numbers 
     n_players = length(solution_inverse.player_weights)
-    T = 100
+    T = size(solution_inverse.x, 2)
     T_activate_goalcost = T
 
     # System 
@@ -164,8 +169,9 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
 
         # Generate initial position and velocity for each player
         as = rand(rng, n_players) .* 2*pi
-        # zs_0 = rand(rng, n_players)
-        zs_0 = zeros(n_players)
+        sort!(as)
+        zs_0 = rand(rng, n_players)
+        # zs_0 = zeros(n_players)
         x0 = vcat(
         [
             vcat(-scale*unitvector(a), zs_0[idx], [v_init*cos(a - os), v_init*sin(a - os), 0]) for
@@ -174,10 +180,9 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
         )
 
         # Setup costs and control system 
-        # as_goals = rand(rng, n_players) .* 2*pi # random goal for each player
         as_goals = as
-        # zs_goals = rand(rng, n_players) # random goal for each player
-        zs_goals = ones(n_players)
+        zs_goals = rand(rng, n_players) # random goal for each player
+        # zs_goals = ones(n_players)
 
         # Costs
         weights = [10.0 0.00001;
@@ -208,19 +213,32 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
         for i in 1:n_players
             for j in 1:n_players
                 if i != j
-                    if norm(x0[(1:2) .+ (i - 1)*n_states_per_player] - x0[(1:2) .+ (j - 1)*n_states_per_player]) < 1.2*maximum(solution_inverse.ρs)
+                    if norm(x0[(1:2) .+ (i - 1)*n_states_per_player] - x0[(1:2) .+ (j - 1)*n_states_per_player]) < 1.0*maximum(solution_inverse.ρs)
                         skip = true
                     end
                 end
             end
         end
-        # Skip if any two goal positions are closer than maximum KoZ radius
+        # # Skip if any two goal positions are closer than maximum KoZ radius
+        # for i in 1:n_players
+        #     for j in 1:n_players
+        #         if i != j
+        #             if norm(player_cost_models[i].goal_position[1:2] - player_cost_models[j].goal_position[1:2]) < 1.0*maximum(solution_inverse.ρs)
+        #                 skip = true
+        #             end
+        #         end
+        #     end
+        # end
+        # Skip if any two adjacent players are closer than maximum KoZ radius
+        # So, if we have n players, player 1 checks 2 and n, players 2 checks 3 and 1, player n checks 1 and n-1
         for i in 1:n_players
-            for j in 1:n_players
-                if i != j
-                    if norm(player_cost_models[i].goal_position[1:2] - player_cost_models[j].goal_position[1:2]) < 1.2*maximum(solution_inverse.ρs)
-                        skip = true
-                    end
+            if i == 1
+                if norm(x0[(1:2) .+ (i - 1)*n_states_per_player] - x0[(1:2) .+ (n_players - 1)*n_states_per_player]) < 1.0*maximum(solution_inverse.ρs)
+                    skip = true
+                end
+            else
+                if norm(x0[(1:2) .+ (i - 1)*n_states_per_player] - x0[(1:2) .+ (i - 2)*n_states_per_player]) < 1.0*maximum(solution_inverse.ρs)
+                    skip = true
                 end
             end
         end
@@ -229,9 +247,15 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 1.0, max_wa
             continue
         end
 
-        adjacency_matrix = [false true  true;
-                            false false true;
-                            false false false]
+        # Adjacency matrix
+        adjacency_matrix = zeros(Bool, n_players, n_players)
+        for i in 1:n_players
+            for j in 1:n_players
+                if i < j
+                    adjacency_matrix[i, j] = true
+                end
+            end
+        end
         
 
         # Solve forward game with KKT solver

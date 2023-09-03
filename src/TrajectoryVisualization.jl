@@ -231,7 +231,7 @@ function visualize_rotating_hyperplanes(states, params; title = "", koz = true, 
             [params.goals[player][1] for player in 1:(params.n_players)],
             [params.goals[player][2] for player in 1:(params.n_players)],
             markersize = 5,
-            marker = :x,
+            marker = :star4,
             color = colors,
         )
 
