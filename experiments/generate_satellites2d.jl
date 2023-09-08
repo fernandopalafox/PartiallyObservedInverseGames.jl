@@ -24,17 +24,18 @@ include("utils/misc.jl")
 let 
 
 ΔT = 0.1
-n_players = 2
+n_players = 4
 n_states_per_player = 4
-scale = 1
+scale = 100
 t_real = 10.0
 t_real_activate_goalcost = t_real
 
-weights = repeat([0.0001 10.0 0.0001], outer = n_players) # works well enough 
+weights = repeat([75.0 10.0 0.0001], outer = n_players) # works well enough 
 
-v_init = 0.5
-os = deg2rad(90) # init. angle offset
-max_wall_time = 60.0
+v_init = 10.0
+os_v = deg2rad(20) # init. angle offset
+os_init = pi/4 # init. angle offset
+max_wall_time = 10.0
 
 # Satellite parameters
 m   = 100.0 # kg
@@ -45,12 +46,13 @@ n = sqrt(grav_parameter/(r₀^3)) # rad/s
 
 # Setup system
 control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m) for _ in 1:n_players])
-as = [2*pi/n_players * (i-1) for i in 1:n_players] # angles
-as = [a > pi ? a - 2*pi : a for a in as]
+# as = [2*pi/n_players * (i-1) for i in 1:n_players] # angles
+# as = [a > pi ? a - 2*pi : a for a in as]
+as = [-pi/2 + os_init*(i - 1) for i in 1:n_players] # angles
 
 x0 = vcat(
     [
-        vcat(-scale*unitvector(a), [v_init*cos(a - os), v_init*sin(a - os)]) for
+        vcat(-scale*unitvector(a), [v_init*cos(a - os_v), v_init*sin(a - os_v)]) for
         a in as
     ]...,
 )
@@ -69,7 +71,8 @@ player_cost_models = map(enumerate(as)) do (ii, a)
             state_goal      = weights[ii, 2],
             control_Δv      = weights[ii, 3]),
         T_activate_goalcost,
-        prox_min_regularization = 0.1
+        # prox_min_regularization = 0.1*scale
+        prox_min_regularization = 0.01*scale
     )
 end
 

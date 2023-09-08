@@ -655,9 +655,9 @@ function solve_inverse_game(
     init = (),
     solver = Ipopt.Optimizer,
     solver_attributes = (; max_wall_time = 20.0, print_level = 5),
-    cmin = 1e-5,
-    ρmin = 0.1,
-    μ = 10.0,
+    μ = 1.0,
+    parameter_bounds = (;ω = (0.0, 1.0), α = (-pi, pi), ρ = (2.0, Inf)),
+    regularization_weights = (;ρ = 1.0)
 )
 
     # ---- Initial settings ---- 
@@ -676,9 +676,9 @@ function solve_inverse_game(
 
     # Decision variables
     if !isnothing(adjacency_matrix) && n_couples > 0
-        ωs = @variable(opt_model, [1:n_couples], lower_bound = 0, upper_bound = 1.0, start = 0.2)
-        αs = @variable(opt_model, [1:n_couples], lower_bound = -pi,  upper_bound = pi)
-        ρs = @variable(opt_model, [1:n_couples], lower_bound = ρmin, start = 0.1)
+        ωs = @variable(opt_model, [1:n_couples], lower_bound = parameter_bounds.ω[1], upper_bound = parameter_bounds.ω[2], start = 0.2)
+        αs = @variable(opt_model, [1:n_couples], lower_bound = parameter_bounds.α[1], upper_bound = parameter_bounds.α[2], start = 0.0)
+        ρs = @variable(opt_model, [1:n_couples], lower_bound = parameter_bounds.ρ[1], upper_bound = parameter_bounds.ρ[2], start = parameter_bounds.ρ[1])
         constraint_parameters = (; adjacency_matrix, ωs, αs, ρs)
 
         couples = findall(constraint_parameters.adjacency_matrix)
@@ -686,17 +686,17 @@ function solve_inverse_game(
         player_couple_list = [findall(couple -> any(hcat(couple[1], couple[2]) .== player_idx), couples) for player_idx in 1:n_players] 
 
         λ_i = @variable(opt_model, [1:length(couples), 2:T])
-        s   = @variable(opt_model, [1:length(couples), 2:T], lower_bound = 0.0) 
+        s   = @variable(opt_model, [1:length(couples), 2:T], lower_bound = 1e-16) 
         # z   = @variable(opt_model, [1:n_players, 1:T])
 
         JuMPUtils.init_if_hasproperty!(ωs, init,:ωs)
-        JuMPUtils.init_if_hasproperty!(αs, init,:αs)
+        # JuMPUtils.init_if_hasproperty!(αs, init,:αs)
         JuMPUtils.init_if_hasproperty!(ρs, init,:ρs)
         JuMPUtils.init_if_hasproperty!(s, init, :s)
         JuMPUtils.init_if_hasproperty!(λ_i, init,:λ_i)
 
         # TEMPORARY
-        JuMP.fix.(αs, 0.0; force = true)   
+        # JuMP.fix.(αs, 0.0; force = true)   
         # JuMP.fix.(ωs, init.ωs; force = true)
         # JuMP.fix.(ρs, init.ρs; force = true)
         # JuMP.fix.(z, 0.0; force = true)
@@ -800,6 +800,9 @@ function solve_inverse_game(
                     s_couple_inv = @variable(opt_model, [t = 2:T])
                     @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s[couple_idx_global, t])
                     @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_i[couple_idx_global, t] == 0)
+
+                    # Equation 19.5b) in Ch.19 of Nocedal and Wright 
+                    # @constraint(opt_model, [t = 2:T], -s[couple_idx_global, t] * λ_i[couple_idx_global, t] - μ == 0)
                 end                
             end
             dhdx = vcat(dhdx_container...)
@@ -859,10 +862,13 @@ function solve_inverse_game(
         sum(el -> el^2, x .- y.x)
         # + 10*sum(el -> el^2, z)
         # + 0.00001 * sum(el -> el^2, ωs)
-        # + 0.0001 * sum(el -> el^2, αs)
+        # + 0.1 * sum(el -> el^2, αs)
         # + 0.001 * sum(el -> (el - ρmin)^2, ρs) 
-        - 0.01 * sum(el -> el, ρs)
+        - regularization_weights.ρ * sum(el -> el, ρs)
+        # - sum(s)
     )
+
+    JuMPUtils.init_model_if_hasproperty!(opt_model, init, :model)
 
     # Solve problem 
     time = @elapsed JuMP.optimize!(opt_model)

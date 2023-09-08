@@ -30,9 +30,13 @@ function infer()
     # ---- User settings ----
 
     # Game settings
-    n_players = 6
+    n_players = 3
     n_states_per_player = 4
-    scale = 1
+    scale = 100
+
+    # Cost settings 
+    weights = repeat([10.0 0.00001], outer = n_players) # from forward game 
+    os_init = pi/4 # init. angle offset
 
     # Dynamics settings
     ΔT = 0.1
@@ -42,11 +46,13 @@ function infer()
     n = sqrt(grav_param/(r₀^3)) # rad/s
 
     # Inverse game parameters
-    ρmin = 0.05
-    μs = [1e-6]
+    # μs = [10.0, 1.0, 0.1, 0.01, 0.001]
+    μs = [1.0, 0.1]
+    parameter_bounds = (; ω = (0.0, 1.0), α = (0.0, 0.0), ρ = (2.0, Inf))
+    regularization_weights = (; ρ = 0.001)
 
     # Solver settings 
-    max_wall_time = 180.0
+    max_wall_time = 60.0
 
     # Function to compute adjacency_matrix based on number of players. 
     # This is a boolean matrix with trues above the diagonal as seen in the above examples.
@@ -62,9 +68,11 @@ function infer()
     # ---- Solve ----
     
     # Load data 
-    data_states   = Matrix(CSV.read("data/f_2d_"*string(n_players)*"p_s.csv", DataFrame, header = false))
-    data_inputs   = Matrix(CSV.read("data/f_2d_"*string(n_players)*"p_c.csv", DataFrame, header = false))
-    y = (;x = data_states, u = data_inputs)
+    data_states   = Matrix(CSV.read("data/circle_" * string(n_players) * "p.csv", DataFrame, header = false))
+    y = (;x = data_states)
+    # data_states   = Matrix(CSV.read("data/f_2d_"*string(n_players)*"p_s.csv", DataFrame, header = false))
+    # data_inputs   = Matrix(CSV.read("data/f_2d_"*string(n_players)*"p_c.csv", DataFrame, header = false))
+    # y = (;x = data_states, u = data_inputs)
 
     T = size(data_states, 2)
     T_activate_goalcost = T
@@ -73,9 +81,12 @@ function infer()
     control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m) for _ in 1:n_players])
 
     # Presumed cost system with dummy variables
-    as = [2*pi/n_players * (i-1) for i in 1:n_players]
-    as = [a > pi ? a - 2*pi : a for a in as]
-    # zs = [1.0, 1.0, 1.0]
+    # as = [2*pi/n_players * (i-1) for i in 1:n_players]
+    # as = [a > pi ? a - 2*pi : a for a in as]
+    as = [-pi/2 + os_init*(i - 1) for i in 1:n_players] # angles
+
+    # as = [0, pi/4]
+
     player_cost_models = map(enumerate(as)) do (ii, a)
         cost_model = CollisionAvoidanceGame.generate_hyperintegrator_cost(;
             player_idx = ii,
@@ -83,33 +94,83 @@ function infer()
             T,
             goal_position = scale*[cos(a), sin(a)],
             weights = (; 
-                state_goal      = -1,
-                control_Δv      = -1),
+                state_goal      = weights[ii, 1],
+                control_Δv      = weights[ii, 2]),
             T_activate_goalcost,
         )
     end
+    
+    # Solve forward game to initialize 
+    _, solution_kkt, _ = solve_game(
+        KKTGameSolver(),
+        control_system,
+        player_cost_models,
+        y.x[:, 1],
+        T;
+        solver = Ipopt.Optimizer,
+        solver_attributes = (; max_wall_time, print_level = 1),
+    )
 
-    # Solve
-    (converged, solution_inverse) = solve_inverse_game(
+     # Solve inverse game
+     converged_inverse, solution_inverse, model_inverse = solve_inverse_game(
+        InverseHyperplaneSolver(),
+        y, 
+        adjacency_matrix;
+        control_system,
+        player_cost_models,
+        # init = (;s = 1.5*scale, x = solution_kkt.x, u = solution_kkt.u, λ_e = solution_kkt.λ),
+        init = (;s = 1.5*scale, x = y.x, u = solution_kkt.u, λ_e = solution_kkt.λ),
+        solver = Ipopt.Optimizer,
+        solver_attributes = (; max_wall_time, print_level = 5),
+        μ = μs[1],
+        parameter_bounds, 
+        regularization_weights,
+    )
+
+    # Annealing
+    converged_new = converged_inverse
+    solution_new = solution_inverse
+    model_new = model_inverse
+    for μ in μs[2:end]
+        converged_inverse, solution_inverse, model_inverse = solve_inverse_game(
             InverseHyperplaneSolver(),
             y, 
             adjacency_matrix;
             control_system,
             player_cost_models,
-            init = (;s = 1.5, x = data_states, u = data_inputs),
+            init = (;model = model_new, solution_new...),
             solver = Ipopt.Optimizer,
-            solver_attributes = (; max_wall_time, print_level = 5),
-            cmin = 1e-5,
-            ρmin,
-            μ = μs[1],
+            solver_attributes = (; max_wall_time, print_level = 1),
+            μ,
+            parameter_bounds, 
+            regularization_weights,
         )
+
+        if !converged_inverse
+            println("       Inverse game did not converge at μ = ", μ)
+            break
+        else
+            println(
+                "   Converged at μ = ",
+                μ,
+                " ω ",
+                solution_inverse.ωs,
+                " α ",
+                solution_inverse.αs,
+                " ρ ",
+                solution_inverse.ρs,
+            )
+            solution_new = solution_inverse
+            model_new = model_inverse
+        end
+    end
 
     
     # Plot 2d
     plot_parameters = 
         (;
-            n_players = n_players,
-            n_states_per_player = 4,
+            n_players,
+            n_states_per_player,
             goals = [player_cost_models[player].goal_position for player in 1:n_players],
             adjacency_matrix, 
             couples = findall(adjacency_matrix),
@@ -117,6 +178,25 @@ function infer()
             αs = solution_inverse.αs,
             ρs = solution_inverse.ρs,
             ΔT = ΔT
+        )
+    constraint_parameters = (;adjacency_matrix, ωs = solution_inverse.ωs, αs = solution_inverse.αs, ρs = solution_inverse.ρs) 
+    # Forward noisy
+    visualize_rotating_hyperplanes(
+            y.x,
+            (;
+                ΔT = 0.1,
+                adjacency_matrix = zeros(Bool, n_players, n_players),
+                # adjacency_matrix = adjacency_matrix,
+                ωs = constraint_parameters.ωs,
+                αs = constraint_parameters.αs,
+                ρs = constraint_parameters.ρs,
+                n_players,
+                n_states_per_player,
+                goals = [player_cost_models[i].goal_position for i in 1:n_players],
+            );
+            title = "expert",
+            koz = true,
+            fps = 10.0,
         )
     visualize_rotating_hyperplanes(
         solution_inverse.x,

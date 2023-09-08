@@ -166,7 +166,7 @@ function solve_game(
         player_couple_list = [findall(couple -> any(hcat(couple[1], couple[2]) .== player_idx), couples) for player_idx in 1:n_players] 
 
         λ_i = @variable(opt_model, [1:length(couples), 2:T])
-        s   = @variable(opt_model, [1:length(couples), 2:T], lower_bound = 0.0) 
+        s   = @variable(opt_model, [1:length(couples), 2:T], lower_bound = 1e-16) 
 
         JuMPUtils.init_if_hasproperty!(s, init, :s)
         JuMPUtils.init_if_hasproperty!(λ_i, init,:λ_i)
@@ -217,7 +217,7 @@ function solve_game(
         !isempty(player_couple_list[player_idx])
 
             # Print adding KKT constraints to player $player_idx with couples $player_couple_list[player_idx]
-            println("Adding KKT constraints to player $player_idx with couples $(player_couple_list[player_idx])")
+            # println("Adding KKT constraints to player $player_idx with couples $(player_couple_list[player_idx])")
 
             # Extract relevant lms and slacks
             λ_i_couples = λ_i[player_couple_list[player_idx], :]
@@ -245,7 +245,7 @@ function solve_game(
                     u,
                     parameters,
                 )
-                println("   Computing constraint Jacobian for couple $couple_idx_global: $couple")
+                # println("   Computing constraint Jacobian for couple $couple_idx_global: $couple")
 
                 # Stack shared constraint Jacobian. 
                 # One row per couple, timestep indexing along 3rd axis
@@ -266,12 +266,15 @@ function solve_game(
                     # Enforce shared constraint feasibility
                     @constraint(opt_model, [t = 2:T], hs(t) - s[couple_idx_global, t] == 0)
                     push!(used_couples, couple_idx_global) # Add constraint to list of used constraints
-                    println("   Adding shared constraint feasiblity for couple $couple_idx_global: $couple")
+                    # println("   Adding shared constraint feasiblity for couple $couple_idx_global: $couple")
 
                     # ∇ₛL = -μ * s⁻¹ - λ_i = 0
-                    s_couple_inv = @variable(opt_model, [t = 2:T])
-                    @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s[couple_idx_global, t])
-                    @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_i[couple_idx_global, t] == 0)
+                    # s_couple_inv = @variable(opt_model, [t = 2:T])
+                    # @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s[couple_idx_global, t])
+                    # @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_i[couple_idx_global, t] == 0)
+
+                    # Equation 19.5b) in Ch.19 of Nocedal and Wright 
+                    @constraint(opt_model, [t = 2:T], -s[couple_idx_global, t] * λ_i[couple_idx_global, t] - μ == 0)
                 end   
             end
             dhdx = vcat(dhdx_container...)
@@ -298,7 +301,7 @@ function solve_game(
             @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
         else
             # Adding non-shared constraints
-            println("Adding KKT constraints to player $player_idx with no shared constraints")
+            # println("Adding KKT constraints to player $player_idx with no shared constraints")
 
             # Gradient of the Lagrangian wrt x is zero 
             @constraint(
@@ -328,18 +331,21 @@ function solve_game(
     # Match equilbrium 
     # @objective(opt_model, Min, sum((x[:, :] .- init.x).^2))
 
+    # Set all start values 
+    JuMPUtils.init_model_if_hasproperty!(opt_model, init, :model)
+
     # Solve problem 
     time = @elapsed JuMP.optimize!(opt_model)
     # @info time
     n_couples > 0 ? solution = JuMPUtils.get_values(; x, u, λ_i, λ_e, s) : solution = JuMPUtils.get_values(; x, u, λ_e)
 
     # Print out difference of solved initial state vs. nominal initial state
-    println("Maximum error in initial state = $(maximum(abs.(solution.x[:,1] - x0[:,1])))")
+    # println("Maximum error in initial state = $(maximum(abs.(solution.x[:,1] - x0[:,1])))")
 
     # Print difference vectors between solved and nominal initial state
-    println(
-        "Δv = \n    P1 = $(solution.x[3:4,1] - x0[3:4,1])\n    P2 = $(solution.x[7:8,1] - x0[7:8,1])",
-    )
+    # println(
+    #     "Δv = \n    P1 = $(solution.x[3:4,1] - x0[3:4,1])\n    P2 = $(solution.x[7:8,1] - x0[7:8,1])",
+    # )
     
     (JuMPUtils.isconverged(opt_model), time, solution, opt_model)
 end
