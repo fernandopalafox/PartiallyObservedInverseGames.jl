@@ -24,19 +24,19 @@ using LinearAlgebra: norm
 
 include("utils/misc.jl")
 
-# Infer hyperplane parameters from expert data 
-function infer()
+"Setup for experiment where we infer hyperplane parameters from expert data and then use them to solve the forward game"
+function setup_forward_hyperplanes()
 
     # ---- User settings ----
 
     # Game settings
     n_players = 3
-    n_states_per_player = 4
+    n_states_per_player = 4 # in 3D
     scale = 100
 
-    # Cost settings 
-    weights = repeat([10.0 0.00001], outer = n_players) # from forward game 
-    os_init = pi/4 # init. angle offset
+    # Load data 
+    data_states   = Matrix(CSV.read("data/circle_" * string(n_players) * "p.csv", DataFrame, header = false))
+    observation = (;x = data_states)
 
     # Dynamics settings
     ΔT = 0.1
@@ -44,49 +44,14 @@ function infer()
     r₀ = (400 + 6378.137) # km
     grav_param  = 398600.4418 # km^3/s^2
     n = sqrt(grav_param/(r₀^3)) # rad/s
-
-    # Inverse game parameters
-    # μs = [10.0, 1.0, 0.1, 0.01, 0.001]
-    μs = [1.0, 0.1]
-    parameter_bounds = (; ω = (0.0, 1.0), α = (0.0, 0.0), ρ = (2.0, Inf))
-    regularization_weights = (; ρ = 0.001)
-
-    # Solver settings 
-    max_wall_time = 60.0
-
-    # Function to compute adjacency_matrix based on number of players. 
-    # This is a boolean matrix with trues above the diagonal as seen in the above examples.
-    adjacency_matrix = zeros(Bool, n_players, n_players)
-    for i in 1:n_players
-        for j in 1:n_players
-            if i < j
-                adjacency_matrix[i, j] = true
-            end
-        end
-    end
-
-    # ---- Solve ----
-    
-    # Load data 
-    data_states   = Matrix(CSV.read("data/circle_" * string(n_players) * "p.csv", DataFrame, header = false))
-    y = (;x = data_states)
-    # data_states   = Matrix(CSV.read("data/f_2d_"*string(n_players)*"p_s.csv", DataFrame, header = false))
-    # data_inputs   = Matrix(CSV.read("data/f_2d_"*string(n_players)*"p_c.csv", DataFrame, header = false))
-    # y = (;x = data_states, u = data_inputs)
-
-    T = size(data_states, 2)
-    T_activate_goalcost = T
-
-    # Setup control system 
     control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m) for _ in 1:n_players])
 
-    # Presumed cost system with dummy variables
-    # as = [2*pi/n_players * (i-1) for i in 1:n_players]
-    # as = [a > pi ? a - 2*pi : a for a in as]
+    # Cost settings 
+    weights = repeat([10.0 0.00001], outer = n_players) # from forward game 
+    os_init = pi/4 # init. angle offset
     as = [-pi/2 + os_init*(i - 1) for i in 1:n_players] # angles
-
-    # as = [0, pi/4]
-
+    T = size(data_states, 2)
+    T_activate_goalcost = T
     player_cost_models = map(enumerate(as)) do (ii, a)
         cost_model = CollisionAvoidanceGame.generate_hyperintegrator_cost(;
             player_idx = ii,
@@ -99,13 +64,82 @@ function infer()
             T_activate_goalcost,
         )
     end
-    
+
+    # Inverse game parameters
+    μs = [10.0]
+    regularization_weights = (; ρ = 0.0001)
+    adjacency_matrix = zeros(Bool, n_players, n_players)
+    for i in 1:n_players
+        for j in 1:n_players
+            if i < j
+                adjacency_matrix[i, j] = true
+            end
+        end
+    end
+
+    # Solver settings 
+    max_wall_time = 15.0
+    parameter_bounds = (; ω = (0.0, 1.0), α = (0.0, 0.0), ρ = (2.0, scale/2.0))
+
+    # Monte Carlo settings 
+    rng = MersenneTwister(4)
+    v_init = 0.0
+    max_samples = 50
+    mc_scale = 2.0*scale
+    mc_n_states_per_player = 6 # in 3D
+    mc_control_system = TestDynamics.ProductSystem([TestDynamics.Satellite3D(ΔT, n, m) for _ in 1:n_players])
+
+    (;
+        n_players,
+        n_states_per_player,
+        scale,
+        ΔT,
+        T,
+        T_activate_goalcost,
+        control_system,
+        weights,
+        player_cost_models,
+        adjacency_matrix,
+        μs,
+        parameter_bounds,
+        regularization_weights,
+        max_wall_time,
+        observation,
+        rng,
+        v_init, 
+        max_samples,
+        mc_scale,
+        mc_n_states_per_player,
+        mc_control_system,
+    )
+end
+
+"Infer hyperplane parameters from expert data "
+function inverse(game_setup)
+
+    # ---- Extract setup ----
+    @unpack n_players,
+    n_states_per_player,
+    scale,
+    ΔT,
+    T,
+    control_system,
+    player_cost_models,
+    adjacency_matrix,
+    μs,
+    parameter_bounds,
+    regularization_weights,
+    max_wall_time,
+    observation = game_setup
+
+    # ---- Solve ----
+
     # Solve forward game to initialize 
     _, solution_kkt, _ = solve_game(
         KKTGameSolver(),
         control_system,
         player_cost_models,
-        y.x[:, 1],
+        observation.x[:, 1],
         T;
         solver = Ipopt.Optimizer,
         solver_attributes = (; max_wall_time, print_level = 1),
@@ -114,12 +148,12 @@ function infer()
      # Solve inverse game
      converged_inverse, solution_inverse, model_inverse = solve_inverse_game(
         InverseHyperplaneSolver(),
-        y, 
+        observation, 
         adjacency_matrix;
         control_system,
         player_cost_models,
         # init = (;s = 1.5*scale, x = solution_kkt.x, u = solution_kkt.u, λ_e = solution_kkt.λ),
-        init = (;s = 1.5*scale, x = y.x, u = solution_kkt.u, λ_e = solution_kkt.λ),
+        init = (;s = 1.5*scale, x = observation.x, u = solution_kkt.u, λ_e = solution_kkt.λ),
         solver = Ipopt.Optimizer,
         solver_attributes = (; max_wall_time, print_level = 5),
         μ = μs[1],
@@ -134,7 +168,7 @@ function infer()
     for μ in μs[2:end]
         converged_inverse, solution_inverse, model_inverse = solve_inverse_game(
             InverseHyperplaneSolver(),
-            y, 
+            observation, 
             adjacency_matrix;
             control_system,
             player_cost_models,
@@ -165,7 +199,6 @@ function infer()
         end
     end
 
-    
     # Plot 2d
     plot_parameters = 
         (;
@@ -182,7 +215,7 @@ function infer()
     constraint_parameters = (;adjacency_matrix, ωs = solution_inverse.ωs, αs = solution_inverse.αs, ρs = solution_inverse.ρs) 
     # Forward noisy
     visualize_rotating_hyperplanes(
-            y.x,
+            observation.x,
             (;
                 ΔT = 0.1,
                 adjacency_matrix = zeros(Bool, n_players, n_players),
@@ -206,34 +239,35 @@ function infer()
         fps = 10.0,
     )
 
-    solution_inverse, plot_parameters
+    solution_inverse
 end
 
 # Monte Carlo simulation
-function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 0.0001, max_wall_time = 60.0, visualize = false)
+function mc(trials, solution_inverse, game_setup; visualize = false)
 
-    # Tuneable parameters
-    scale = 1.0
-    v_init = 0.1
-    ΔT = 0.1
-    T_activate_goalcost = 1
-    n_states_per_player = 6
-    os = deg2rad(0) # init. angle offset
+    # ---- Extract setup ----
+    @unpack n_players,
+    mc_n_states_per_player,
+    mc_scale,
+    ΔT,
+    T,
+    T_activate_goalcost,
+    weights,
+    mc_control_system,
+    adjacency_matrix,
+    μs,
+    parameter_bounds,
+    regularization_weights,
+    max_wall_time,
+    observation,
+    rng, 
+    v_init,
+    max_samples,
+    mc_scale = game_setup
 
-    # User input
-    m   = 100.0 # kg
-    r₀ = (400 + 6378.137) # km
-    grav_param  = 398600.4418 # km^3/s^2
-
-    n = sqrt(grav_param/(r₀^3)) # rad/s
-
-    # Useful numbers 
-    n_players = length(solution_inverse.player_weights)
-    T = size(solution_inverse.x, 2)
-    T_activate_goalcost = T
-
-    # System 
-    control_system = TestDynamics.ProductSystem([TestDynamics.Satellite3D(ΔT, n, m) for _ in 1:n_players])
+    n_states_per_player = mc_n_states_per_player
+    control_system = mc_control_system
+    scale = mc_scale
 
     # Monte Carlo simulation
     results_x0 = []
@@ -242,33 +276,25 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 0.0001, max
     results_converged = []
     results_solution = []
     results_time = []
-    i = 1
-    i_sample = 1
-    while i <= trials
+    trial_counter = 1
+    sample_counter = 0
+    while trial_counter <= trials
         
-
         # Generate initial position and velocity for each player
         as = rand(rng, n_players) .* 2*pi
-        sort!(as)
         zs_0 = rand(rng, n_players)
-        # zs_0 = zeros(n_players)
         x0 = vcat(
         [
-            vcat(-scale*unitvector(a), zs_0[idx], [v_init*cos(a - os), v_init*sin(a - os), 0]) for
+            vcat(-scale*unitvector(a), zs_0[idx], [v_init*cos(a), v_init*sin(a), 0]) for
             (idx, a) in enumerate(as)
         ]...,
         )
 
-        # Setup costs and control system 
+        # Setup sampled costs and control system 
         as_goals = as
         zs_goals = rand(rng, n_players) # random goal for each player
-        # zs_goals = ones(n_players)
 
         # Costs
-        weights = [10.0 0.00001;
-                   10.0 0.00001; 
-                   10.0 0.00001];   
-
         player_cost_models = map(enumerate(as_goals)) do (ii, a)
             cost_model_p1 = CollisionAvoidanceGame.generate_3dintegrator_cost(;
                 player_idx = ii,
@@ -283,89 +309,69 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 0.0001, max
         end
 
         skip = false
-        i_sample = i_sample + 1
-        println("   Sample counter = $i_sample")
-        if i_sample > 50
+        sample_counter = sample_counter + 1
+        if sample_counter > max_samples
             break
         end
+        # println("   Sample counter = $sample_counter")
 
-        # Skip if any two initial positions are closer than maximum KoZ radius
-        for i in 1:n_players
-            for j in 1:n_players
-                if i != j
-                    if norm(x0[(1:2) .+ (i - 1)*n_states_per_player] - x0[(1:2) .+ (j - 1)*n_states_per_player]) < 1.0*maximum(solution_inverse.ρs)
-                        skip = true
-                    end
-                end
+        # Skip sample if initial positions are too close or goals are too close
+        couples = findall(adjacency_matrix)
+        for (couple_counter, couple) in enumerate(couples)
+            p1 = couple[1]
+            p2 = couple[2]
+
+            norm_initial = norm(
+                x0[(1 + (p1 - 1) * n_states_per_player):(2 + (p1 - 1) * n_states_per_player)] - 
+                x0[(1 + (p2 - 1) * n_states_per_player):(2 + (p2 - 1) * n_states_per_player)]
+            )
+
+            norm_goal = norm(
+                player_cost_models[p1].goal_position - 
+                player_cost_models[p2].goal_position
+            )
+
+            # Check initial positions are not closer than corresponding KoZ radius
+            if norm_initial < 1.0 * solution_inverse.ρs[couple_counter]
+                skip = true
+                # println("   Skipping sample: ($p1,$p2) init too close. norm_initial = $norm_initial, ρ = $(solution_inverse.ρs[couple_counter])")
             end
-        end
-        # # Skip if any two goal positions are closer than maximum KoZ radius
-        # for i in 1:n_players
-        #     for j in 1:n_players
-        #         if i != j
-        #             if norm(player_cost_models[i].goal_position[1:2] - player_cost_models[j].goal_position[1:2]) < 1.0*maximum(solution_inverse.ρs)
-        #                 skip = true
-        #             end
-        #         end
-        #     end
-        # end
-        # Skip if any two adjacent players are closer than maximum KoZ radius
-        # So, if we have n players, player 1 checks 2 and n, players 2 checks 3 and 1, player n checks 1 and n-1
-        for i in 1:n_players
-            if i == 1
-                if norm(x0[(1:2) .+ (i - 1)*n_states_per_player] - x0[(1:2) .+ (n_players - 1)*n_states_per_player]) < 1.0*maximum(solution_inverse.ρs)
-                    skip = true
-                end
-            else
-                if norm(x0[(1:2) .+ (i - 1)*n_states_per_player] - x0[(1:2) .+ (i - 2)*n_states_per_player]) < 1.0*maximum(solution_inverse.ρs)
-                    skip = true
-                end
+
+            # Check goals are not too close 
+            if norm_goal < 1.0 * solution_inverse.ρs[couple_counter]
+                skip = true
+                # println("   Skipping sample: ($p1,$p2) goals too close. norm_goal = $norm_goal, ρ = $(solution_inverse.ρs[couple_counter])")
             end
         end
 
         if skip 
             continue
-        end
-
-        # Adjacency matrix
-        adjacency_matrix = zeros(Bool, n_players, n_players)
-        for i in 1:n_players
-            for j in 1:n_players
-                if i < j
-                    adjacency_matrix[i, j] = true
-                end
-            end
-        end
-        
+        else
+            sample_counter = 0
+        end        
 
         # Solve forward game with KKT solver
         _, solution_kkt, _ = 
         solve_game(KKTGameSolver(), control_system, player_cost_models, x0, T; 
         solver = Ipopt.Optimizer, 
-        solver_attributes = (; max_wall_time, print_level = 1))
-
-        # Check closest approach and skip if closest approach is greater than smallest KoZ radius
-        if minimum(min_distance(solution_kkt.x, (;n_players, n_states_per_player))) > 1.0*minimum(solution_inverse.ρs)
-            continue
-        end      
+        solver_attributes = (; max_wall_time, print_level = 1))    
 
         # Solve forward game with inferred hyperplane
         constraint_parameters = (;adjacency_matrix, ωs = solution_inverse.ωs, αs = solution_inverse.αs, ρs = solution_inverse.ρs)
         converged_forward, time_forward, solution_hyp, _ = 
             solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, constraint_parameters, T;
-            # init = (;x = solution_kkt.x, u = solution_kkt.u, s = 1.5),
-            init = (;s = 1.5),
+            init = (;s = 1.5 * scale, x = solution_kkt.x, u = solution_kkt.u, λ_e = solution_kkt.λ),
             solver = Ipopt.Optimizer, 
-            solver_attributes = (; max_wall_time = 20.0, print_level = 5),
-            μ
+            solver_attributes = (; max_wall_time, print_level = 1),
+            μ = μs[1]
             )
 
         # Visualization 
         if visualize || !converged_forward
             plot_parameters = 
                 (;
-                    n_players = 3,
-                    n_states_per_player = 6,
+                    n_players,
+                    n_states_per_player,
                     goals = [player_cost_models[player].goal_position for player in 1:n_players],
                     adjacency_matrix,
                     couples = findall(adjacency_matrix),
@@ -405,7 +411,7 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 0.0001, max
         end
 
         # Print trial number, whether it converged or not, and the time it took
-        println("Trial $i: Converged: $converged_forward, Time: $time_forward")
+        println("Trial $trial_counter: Converged: $converged_forward, Time: $time_forward")
 
         # push! trial info into results tuple
         # x0, goals, adjacency_matrix, converged_forward
@@ -417,8 +423,8 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 0.0001, max
         push!(results_time, time_forward)
 
         # Plot segments
-        if !converged_forward || true #temporary
-            plt = plot(title = "Trial $i, Converged = $converged_forward",
+        if !converged_forward
+            plt = plot(title = "Trial $trial_counter, Converged = $converged_forward",
                         xlabel = "x",
                         ylabel = "y",
                         aspect_ratio = :equal,
@@ -446,7 +452,7 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 0.0001, max
                             color = colors[i],
                             marker = :circle,
                             )
-                        annotate!([x0[1 + (i - 1)*n_states_per_player] + 0.2*scale],
+                        annotate!([x0[1 + (i - 1)*n_states_per_player] + 0.2*mc_scale],
                                 [x0[2 + (i - 1)*n_states_per_player]],"$i")
 
                         # goal position
@@ -465,7 +471,7 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 0.0001, max
             display(plt)
         end
 
-        i = i + 1
+        trial_counter = trial_counter + 1
     end
 
     results = (;
@@ -483,96 +489,4 @@ function mc(solution_inverse, trials; rng = MersenneTwister(0), μ = 0.0001, max
     println("Convergence rate: $(sum(results.converged)/trials)")
 
     return results
-end
-
-# Helper functions
-function collision_likely(x1, g1, x2, g2)
-    # Doesn't work for parallel lines
-
-    # Check orientation of line segments
-    o1 = orientation(x1, g1, x2)
-    o2 = orientation(x1, g1, g2)
-    o3 = orientation(x2, g2, x1)
-    o4 = orientation(x2, g2, g1)
-
-    # General case 
-    if o1 != o2 && o3 != o4
-        return true
-    else 
-        return false
-    end
-
-end
-
-function orientation(p, q, r)
-    # See https://www.geeksforgeeks.org/orientation-3-ordered-points/
-    # for details of below formula.
-    val = (q[2] - p[2]) * (r[1] - q[1]) -
-          (q[1] - p[1]) * (r[2] - q[2])
-    if val > 0
-        return 1
-    elseif val < 0
-        return 2
-    else
-        return 0
-    end
-
-end
-
-function test_intersection()
-    p1 = [1, 1]
-    q1 = [10, 1]
-    p2 = [1, 2]
-    q2 = [10, 2]
-    
-    if collision_likely(p1, q1, p2, q2)
-        println("Yes")
-    else
-        println("No")
-    end
-
-    p1 = [10, 0]
-    q1 = [0, 10]
-    p2 = [0, 0]
-    q2 = [10, 10]
-
-    if collision_likely(p1, q1, p2, q2)
-        println("Yes")
-    else
-        println("No")
-    end
-
-    p1 = [-5, -5]
-    q1 = [0, 0]
-    p2 = [1, 1]
-    q2 = [10, 10]
-
-    if collision_likely(p1, q1, p2, q2)
-        println("Yes")
-    else
-        println("No")
-    end
-end
-
-function min_distance(states, parameters)
-    position_indices = vcat(
-            [[1 2 3] .+ (player - 1) * parameters.n_states_per_player for player in 1:(parameters.n_players)]...,
-        )
-
-    # Create an empty vector of vectors to store the colors
-    min_distances = zeros(parameters.n_players)
-
-    for idx_ego in 1:parameters.n_players
-        min_distance_to_other = ones(size(states,2)) .* Inf
-        pos_ego = states[position_indices[idx_ego, 1:2], :]
-        for idx_other in setdiff(1:parameters.n_players, idx_ego)
-            pos_other = states[position_indices[idx_other, 1:2], :]
-            distance_to_other = map(norm, eachcol(pos_ego .- pos_other))
-            min_distance_to_other = vec(minimum(hcat(min_distance_to_other, distance_to_other), dims = 2)) # In Julia 1.9 norm has dim arg 
-        end
-        # Print player i minimum distance to others
-        println("   Player $idx_ego min distance to others: ", minimum(min_distance_to_other))
-        min_distances[idx_ego] = minimum(min_distance_to_other)
-    end
-    return min_distances
 end

@@ -498,7 +498,7 @@ function trajectory_comparison(states_1, states_2, parameters; title = "Forward 
                 min_distance_to_other = vec(minimum(hcat(min_distance_to_other, distance_to_other), dims = 2)) # In Julia 1.9 norm has dim arg 
             end
             # Print player i minimum distance to others
-            println("   Player $idx_ego min distance to others: ", minimum(min_distance_to_other))
+            # println("   Player $idx_ego min distance to others: ", minimum(min_distance_to_other))
             # push!(player_colors, 1 ./ min_distance_to_other) 
             push!(player_colors, min_distance_to_other) 
         end
