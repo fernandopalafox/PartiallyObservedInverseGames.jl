@@ -46,7 +46,7 @@ n = sqrt(grav_parameter/(r₀^3)) # rad/s
 
 u_max = 1.0
 
-μ = 10.0
+μs = [10.0, 1.0, 0.1, 0.01, 0.001, 0.0001]
 
 # Setup system
 control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m, u_max) for _ in 1:n_players])
@@ -84,19 +84,49 @@ end
 constraint_parameters = (;adjacency_matrix = zeros(Bool, n_players, n_players))
 
 # ---- Solve FG ---- 
-kkt_converged, kkt_time, kkt_solution, kkt_model = 
+_, _, solution_forward, model_forward = 
         solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, constraint_parameters, T; 
         solver = Ipopt.Optimizer, 
         solver_attributes = (;max_wall_time, print_level = 5),
-        μ)
+        μ = μs[1])
+
+solution_new = solution_forward
+model_new = model_forward
+for μ in μs[2:end]
+    converged_forward, _, solution_forward, model_forward = solve_game(
+        KKTGameSolverBarrier(),
+        control_system,
+        player_cost_models,
+        x0,
+        constraint_parameters,
+        T;
+        init = (;model = model_new, solution_new...),
+        solver = Ipopt.Optimizer,
+        solver_attributes = (; max_wall_time, print_level = 1),
+        μ,
+    )
+
+    if !converged_forward
+        println("Forward game did not converge at μ = ", μ)
+        solution_forward = solution_new
+        model_forward = model_new
+        break
+    else
+        println("Converged at μ = ", μ)
+        solution_new = solution_forward
+        model_new = model_forward
+    end
+end
+solution_forward = solution_new
+model_forward = model_new
 
 # ---- Save trajectory to file ----
-# CSV.write("data/f_2d_" * string(n_players) * "p_s.csv", DataFrame(kkt_solution.x, :auto), header = false)
-# CSV.write("data/f_2d_" * string(n_players) * "p_c.csv", DataFrame(kkt_solution.u, :auto), header = false)
+CSV.write("data/f_2d_" * string(n_players) * "p_s.csv", DataFrame(solution_forward.x, :auto), header = false)
+CSV.write("data/f_2d_" * string(n_players) * "p_c.csv", DataFrame(solution_forward.u, :auto), header = false)
 
 # ---- Animation trajectories ----
 animate_trajectory(
-        kkt_solution.x, 
+    solution_forward.x, 
         (;
             ΔT = ΔT,
             title = "fwd_game_2d_"*string(n_players)*"p", 
@@ -108,9 +138,9 @@ animate_trajectory(
     )
 
 # Print maximum control effort
-println("Maximum control effort: ", maximum(abs.(kkt_solution.u)))
+println("Maximum control effort: ", maximum(abs.(solution_forward.u)))
 
 # Plot controls
-plot(kkt_solution.u', label = ["1_ux" "1_uy" "2_ux" "2_uy"], xlabel = "t", ylabel = "u", title = "Controls", ylims = (-1.1,1.1))
+plot(solution_forward.u', label = ["1_ux" "1_uy" "2_ux" "2_uy"], xlabel = "t", ylabel = "u", title = "Controls", ylims = (-1.1,1.1))
 
 end
