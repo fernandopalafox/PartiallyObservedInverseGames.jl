@@ -2,6 +2,7 @@ struct Satellite2D{T<:Real}
     ΔT::T
     n::T
     m::T
+    u_max::T
 end
 
 function Base.getproperty(system::Satellite2D, sym::Symbol)

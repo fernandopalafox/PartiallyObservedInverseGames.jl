@@ -7,7 +7,7 @@ using Revise
 
 import TestDynamics
 
-using PartiallyObservedInverseGames.ForwardGame: IBRGameSolver, KKTGameSolver, KKTGameSolverBarrier, solve_game
+using PartiallyObservedInverseGames.ForwardGame: KKTGameSolverBarrier, solve_game
 using JuMP: @objective
 using VegaLite: VegaLite
 using PartiallyObservedInverseGames.TrajectoryVisualization:
@@ -23,18 +23,18 @@ include("utils/misc.jl")
 
 let 
 
-ΔT = 0.1
-n_players = 4
+ΔT = 5.0
+n_players = 3
 n_states_per_player = 4
 scale = 100
-t_real = 10.0
+t_real = 200.0
 t_real_activate_goalcost = t_real
 
-weights = repeat([75.0 10.0 0.0001], outer = n_players) # works well enough 
+weights = repeat([0.1 10.0 0.0001], outer = n_players) # works well enough 
 
-v_init = 10.0
-os_v = deg2rad(20) # init. angle offset
-os_init = pi/4 # init. angle offset
+v_init = 0.0
+os_v = deg2rad(0) # init. angle offset
+os_init = pi/2 # init. angle offset
 max_wall_time = 10.0
 
 # Satellite parameters
@@ -44,8 +44,12 @@ grav_parameter  = 398600.4418 # km^3/s^2
 
 n = sqrt(grav_parameter/(r₀^3)) # rad/s
 
+u_max = 1.0
+
+μ = 10.0
+
 # Setup system
-control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m) for _ in 1:n_players])
+control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m, u_max) for _ in 1:n_players])
 # as = [2*pi/n_players * (i-1) for i in 1:n_players] # angles
 # as = [a > pi ? a - 2*pi : a for a in as]
 as = [-pi/2 + os_init*(i - 1) for i in 1:n_players] # angles
@@ -76,16 +80,19 @@ player_cost_models = map(enumerate(as)) do (ii, a)
     )
 end
 
-# ---- Solve FG ---- 
-kkt_converged, kkt_solution, kkt_model = 
-        solve_game(KKTGameSolver(), control_system, player_cost_models, x0, T; 
-        solver = Ipopt.Optimizer, 
-        solver_attributes = (;max_wall_time, print_level = 5))
+# Constraint parameters
+constraint_parameters = (;adjacency_matrix = zeros(Bool, n_players, n_players))
 
+# ---- Solve FG ---- 
+kkt_converged, kkt_time, kkt_solution, kkt_model = 
+        solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, constraint_parameters, T; 
+        solver = Ipopt.Optimizer, 
+        solver_attributes = (;max_wall_time, print_level = 5),
+        μ)
 
 # ---- Save trajectory to file ----
-CSV.write("data/f_2d_" * string(n_players) * "p_s.csv", DataFrame(kkt_solution.x, :auto), header = false)
-CSV.write("data/f_2d_" * string(n_players) * "p_c.csv", DataFrame(kkt_solution.u, :auto), header = false)
+# CSV.write("data/f_2d_" * string(n_players) * "p_s.csv", DataFrame(kkt_solution.x, :auto), header = false)
+# CSV.write("data/f_2d_" * string(n_players) * "p_c.csv", DataFrame(kkt_solution.u, :auto), header = false)
 
 # ---- Animation trajectories ----
 animate_trajectory(
@@ -104,6 +111,6 @@ animate_trajectory(
 println("Maximum control effort: ", maximum(abs.(kkt_solution.u)))
 
 # Plot controls
-plot(kkt_solution.u', label = ["1_ux" "1_uy" "2_ux" "2_uy"], xlabel = "t", ylabel = "u", title = "Controls")
+plot(kkt_solution.u', label = ["1_ux" "1_uy" "2_ux" "2_uy"], xlabel = "t", ylabel = "u", title = "Controls", ylims = (-1.1,1.1))
 
 end
