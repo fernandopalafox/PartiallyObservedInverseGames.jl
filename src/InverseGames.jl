@@ -434,15 +434,15 @@ struct InverseHyperplaneSolver end
 #         # player_couple_list = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
 #         player_couple_list = [findall(couple -> any(hcat(couple[1], couple[2]) .== player_idx), couples) for player_idx in 1:n_players] 
 
-#         λ_i = @variable(opt_model, [1:length(couples), 2:T])
-#         s   = @variable(opt_model, [1:length(couples), 2:T], lower_bound = 0.0) 
+#         λ_hyperplanes = @variable(opt_model, [1:length(couples), 2:T])
+#         s_hyperplanes   = @variable(opt_model, [1:length(couples), 2:T], lower_bound = 0.0) 
 #         # z   = @variable(opt_model, [1:n_players, 1:T])
 
 #         JuMPUtils.init_if_hasproperty!(ωs, init,:ωs)
 #         JuMPUtils.init_if_hasproperty!(αs, init,:αs)
 #         JuMPUtils.init_if_hasproperty!(ρs, init,:ρs)
-#         JuMPUtils.init_if_hasproperty!(s, init, :s)
-#         JuMPUtils.init_if_hasproperty!(λ_i, init,:λ_i)
+#         JuMPUtils.init_if_hasproperty!(s_hyperplanes, init, :s_hyperplanes)
+#         JuMPUtils.init_if_hasproperty!(λ_hyperplanes, init,:λ_hyperplanes)
 
 #         # TEMPORARY
 #         JuMP.fix.(αs, 0.0; force = true)   
@@ -455,12 +455,12 @@ struct InverseHyperplaneSolver end
 #                 [@variable(opt_model, [keys(cost_model.weights)]) for cost_model in player_cost_models]
 #     x   = @variable(opt_model, [1:n_states, 1:T])
 #     u   = @variable(opt_model, [1:n_controls, 1:T])
-#     λ_e = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
+#     λ_dynamics = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
     
 #     # Warmstart
 #     JuMPUtils.init_if_hasproperty!(x, init, :x)
 #     JuMPUtils.init_if_hasproperty!(u, init, :u)
-#     JuMPUtils.init_if_hasproperty!(λ_e, init,:λ_e)
+#     JuMPUtils.init_if_hasproperty!(λ_dynamics, init,:λ_dynamics)
 #     if hasproperty(init, :player_weights) && !isnothing(init.player_weights)
 #         for (ii, weights) in pairs(init.player_weights)
 #             for k in keys(weights)
@@ -509,8 +509,8 @@ struct InverseHyperplaneSolver end
 #             println("Adding KKT constraints to player $player_idx with couples $(player_couple_list[player_idx])")
 
 #             # Extract relevant lms and slacks
-#             λ_i_couples = λ_i[player_couple_list[player_idx], :]
-#             # s_couples = s[player_couple_list[player_idx], :]
+#             λ_i_couples = λ_hyperplanes[player_couple_list[player_idx], :]
+#             # s_couples = s_hyperplanes[player_couple_list[player_idx], :]
 #             dhdx_container = []
 
 #             for (couple_idx_local, couple) in enumerate(couples[player_couple_list[player_idx]])
@@ -551,14 +551,14 @@ struct InverseHyperplaneSolver end
 #                         parameters;
 #                         set = false,
 #                     )
-#                     @constraint(opt_model, [t = 2:T], hs(t) - s[couple_idx_global, t] == 0)
+#                     @constraint(opt_model, [t = 2:T], hs(t) - s_hyperplanes[couple_idx_global, t] == 0)
 #                     push!(used_couples, couple_idx_global) # Add constraint to list of used constraints
 #                     println("   Adding shared constraint feasiblity for couple $couple_idx_global: $couple")
 
-#                     # ∇ₛL = -μ * s⁻¹ - λ_i = 0
+#                     # ∇ₛL = -μ * s⁻¹ - λ_hyperplanes = 0
 #                     s_couple_inv = @variable(opt_model, [t = 2:T])
-#                     @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s[couple_idx_global, t])
-#                     @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_i[couple_idx_global, t] == 0)
+#                     @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s_hyperplanes[couple_idx_global, t])
+#                     @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_hyperplanes[couple_idx_global, t] == 0)
 #                 end                
 #             end
 #             dhdx = vcat(dhdx_container...)
@@ -567,19 +567,19 @@ struct InverseHyperplaneSolver end
 #             @constraint(
 #                 opt_model,
 #                 [t = 2:(T - 1)],
-#                 dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' -
-#                 λ_e[:, t, player_idx]' * df.dx[:, :, t] + λ_i_couples[:, t].data' * dhdx[:, :, t] .== 0
+#                 dJ.dx[:, t]' + λ_dynamics[:, t - 1, player_idx]' -
+#                 λ_dynamics[:, t, player_idx]' * df.dx[:, :, t] + λ_i_couples[:, t].data' * dhdx[:, :, t] .== 0
 #             )
 #             @constraint(
 #                 opt_model,
-#                 dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' + λ_i_couples[:, T].data' * dhdx[:, :, T] .== 0
+#                 dJ.dx[:, T]' + λ_dynamics[:, T - 1, player_idx]' + λ_i_couples[:, T].data' * dhdx[:, :, T] .== 0
 #             ) 
 
-#             # Gradient of the Lagrangian wrt player's own inputs is zero
+#             # Gradient of the Lagrangian wrt player's_hyperplanes own inputs is zero
 #             @constraint(
 #                 opt_model,
 #                 [t = 1:(T - 1)],
-#                 dJ.du[player_inputs, t]' - λ_e[:, t, player_idx]' * df.du[:, player_inputs, t] .==
+#                 dJ.du[player_inputs, t]' - λ_dynamics[:, t, player_idx]' * df.du[:, player_inputs, t] .==
 #                 0
 #             )
 #             @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
@@ -591,19 +591,19 @@ struct InverseHyperplaneSolver end
 #             @constraint(
 #                 opt_model,
 #                 [t = 2:(T - 1)],
-#                 dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' -
-#                 λ_e[:, t, player_idx]' * df.dx[:, :, t] .== 0
+#                 dJ.dx[:, t]' + λ_dynamics[:, t - 1, player_idx]' -
+#                 λ_dynamics[:, t, player_idx]' * df.dx[:, :, t] .== 0
 #             )
 #             @constraint(
 #                 opt_model,
-#                 dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' .== 0
+#                 dJ.dx[:, T]' + λ_dynamics[:, T - 1, player_idx]' .== 0
 #             ) 
 
 #             # Gradient of the Lagrangian wrt u is zero
 #             @constraint(
 #                 opt_model,
 #                 [t = 1:(T - 1)],
-#                 dJ.du[player_inputs, t]' - λ_e[:, t, player_idx]' * df.du[:, player_inputs, t] .==
+#                 dJ.du[player_inputs, t]' - λ_dynamics[:, t, player_idx]' * df.du[:, player_inputs, t] .==
 #                 0
 #             )
 #             @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
@@ -635,11 +635,11 @@ struct InverseHyperplaneSolver end
 #     solution =
 #         n_couples > 0 ?
 #         merge(
-#             JuMPUtils.get_values(; x, u, λ_i, λ_e, s, ωs, αs, ρs),
+#             JuMPUtils.get_values(; x, u, λ_hyperplanes, λ_dynamics, s_hyperplanes, ωs, αs, ρs),
 #             (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights)),
 #         ) :
 #         merge(
-#             JuMPUtils.get_values(; x, u, λ_e),
+#             JuMPUtils.get_values(; x, u, λ_dynamics),
 #             (; player_weights = map(w -> CostUtils.namedtuple(JuMP.value.(w)), player_weights)),
 #         )
     
@@ -682,34 +682,28 @@ function solve_inverse_game(
         constraint_parameters = (; adjacency_matrix, ωs, αs, ρs)
 
         couples = findall(constraint_parameters.adjacency_matrix)
-        # player_couple_list = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:n_players] 
         player_couple_list = [findall(couple -> any(hcat(couple[1], couple[2]) .== player_idx), couples) for player_idx in 1:n_players] 
 
-        λ_i = @variable(opt_model, [1:length(couples), 2:T])
-        s   = @variable(opt_model, [1:length(couples), 2:T], lower_bound = 1e-16) 
-        # z   = @variable(opt_model, [1:n_players, 1:T])
+        λ_hyperplanes = @variable(opt_model, [1:length(couples), 2:T])
+        s_hyperplanes   = @variable(opt_model, [1:length(couples), 2:T], lower_bound = 1e-16) 
 
         JuMPUtils.init_if_hasproperty!(ωs, init,:ωs)
-        # JuMPUtils.init_if_hasproperty!(αs, init,:αs)
+        JuMPUtils.init_if_hasproperty!(αs, init,:αs)
         JuMPUtils.init_if_hasproperty!(ρs, init,:ρs)
-        JuMPUtils.init_if_hasproperty!(s, init, :s)
-        JuMPUtils.init_if_hasproperty!(λ_i, init,:λ_i)
-
-        # TEMPORARY
-        # JuMP.fix.(αs, 0.0; force = true)   
-        # JuMP.fix.(ωs, init.ωs; force = true)
-        # JuMP.fix.(ρs, init.ρs; force = true)
-        # JuMP.fix.(z, 0.0; force = true)
-
+        JuMPUtils.init_if_hasproperty!(s_hyperplanes, init, :s_hyperplanes)
+        JuMPUtils.init_if_hasproperty!(λ_hyperplanes, init, :λ_hyperplanes)
     end
     x   = @variable(opt_model, [1:n_states, 1:T])
     u   = @variable(opt_model, [1:n_controls, 1:T])
-    λ_e = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
+    λ_dynamics = @variable(opt_model, [1:n_states, 1:(T - 1), 1:n_players])
+
+    s_thrust_limits = @variable(opt_model,[1:n_controls, 1:T, 1:2], lower_bound = 1e-16)
+    λ_thrust_limits = @variable(opt_model, [1:n_controls, 1:T, 1:2])
     
     # Warmstart
     JuMPUtils.init_if_hasproperty!(x, init, :x)
     JuMPUtils.init_if_hasproperty!(u, init, :u)
-    JuMPUtils.init_if_hasproperty!(λ_e, init,:λ_e)
+    JuMPUtils.init_if_hasproperty!(λ_dynamics, init,:λ_dynamics)
 
     # ---- Setup constraints ----
 
@@ -736,6 +730,27 @@ function solve_inverse_game(
     DynamicsModelInterface.add_dynamics_constraints!(control_system, opt_model, x, u)
     df = DynamicsModelInterface.add_dynamics_jacobians!(control_system, opt_model, x, u)
 
+    # TEMPORARY: Thrust limits constraints (should be in definition of dynamics)
+    for (player, cost_model) in enumerate(player_cost_models)
+        @unpack player_inputs = cost_model
+        player_control_indices = player_inputs
+        player_n_controls = control_system.subsystems[player].n_controls
+        u_max = control_system.subsystems[player].u_max
+        player_controls = u[player_control_indices, :]
+        player_s = s_thrust_limits[player_control_indices, :, :]
+        player_λ = λ_thrust_limits[player_control_indices, :, :]
+
+        # Primal feasibility 
+        for control_idx in 1:player_n_controls
+            @constraint(opt_model, [t = 1:T],  player_controls[control_idx, t] + u_max - player_s[control_idx, t, 1] == 0)
+            @constraint(opt_model, [t = 1:T], -player_controls[control_idx, t] + u_max - player_s[control_idx, t, 2] == 0)
+        end
+
+        # Vanishing Lagrangian wrt s_thrust_limits
+        @constraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], -player_s[control_idx, t, 1] * player_λ[control_idx, t , 1] - μ == 0)
+        @constraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], -player_s[control_idx, t, 2] * player_λ[control_idx, t , 2] - μ == 0)
+    end
+
     # KKT conditions
     used_couples = []
     for (player_idx, cost_model) in enumerate(player_cost_models)
@@ -750,8 +765,8 @@ function solve_inverse_game(
             # println("Adding KKT constraints to player $player_idx with couples $(player_couple_list[player_idx])")
 
             # Extract relevant lms and slacks
-            λ_i_couples = λ_i[player_couple_list[player_idx], :]
-            # s_couples = s[player_couple_list[player_idx], :]
+            λ_i_couples = λ_hyperplanes[player_couple_list[player_idx], :]
+            # s_couples = s_hyperplanes[player_couple_list[player_idx], :]
             dhdx_container = []
 
             for (couple_idx_local, couple) in enumerate(couples[player_couple_list[player_idx]])
@@ -792,17 +807,17 @@ function solve_inverse_game(
                         parameters;
                         set = false,
                     )
-                    @constraint(opt_model, [t = 2:T], hs(t) - s[couple_idx_global, t] == 0)
+                    @constraint(opt_model, [t = 2:T], hs(t) - s_hyperplanes[couple_idx_global, t] == 0)
                     push!(used_couples, couple_idx_global) # Add constraint to list of used constraints
                     # println("   Adding shared constraint feasiblity for couple $couple_idx_global: $couple")
 
-                    # ∇ₛL = -μ * s⁻¹ - λ_i = 0
+                    # ∇ₛL = -μ * s⁻¹ - λ_hyperplanes = 0
                     s_couple_inv = @variable(opt_model, [t = 2:T])
-                    @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s[couple_idx_global, t])
-                    @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_i[couple_idx_global, t] == 0)
+                    @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s_hyperplanes[couple_idx_global, t])
+                    @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_hyperplanes[couple_idx_global, t] == 0)
 
                     # Equation 19.5b) in Ch.19 of Nocedal and Wright 
-                    # @constraint(opt_model, [t = 2:T], -s[couple_idx_global, t] * λ_i[couple_idx_global, t] - μ == 0)
+                    # @constraint(opt_model, [t = 2:T], -s_hyperplanes[couple_idx_global, t] * λ_hyperplanes[couple_idx_global, t] - μ == 0)
                 end                
             end
             dhdx = vcat(dhdx_container...)
@@ -811,22 +826,29 @@ function solve_inverse_game(
             @constraint(
                 opt_model,
                 [t = 2:(T - 1)],
-                dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' -
-                λ_e[:, t, player_idx]' * df.dx[:, :, t] + λ_i_couples[:, t].data' * dhdx[:, :, t] .== 0
+                dJ.dx[:, t]' + λ_dynamics[:, t - 1, player_idx]' -
+                λ_dynamics[:, t, player_idx]' * df.dx[:, :, t] + λ_i_couples[:, t].data' * dhdx[:, :, t] .== 0
             )
             @constraint(
                 opt_model,
-                dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' + λ_i_couples[:, T].data' * dhdx[:, :, T] .== 0
+                dJ.dx[:, T]' + λ_dynamics[:, T - 1, player_idx]' + λ_i_couples[:, T].data' * dhdx[:, :, T] .== 0
             ) 
 
-            # Gradient of the Lagrangian wrt player's own inputs is zero
+            # Gradient of the Lagrangian wrt player's_hyperplanes own inputs is zero
             @constraint(
                 opt_model,
                 [t = 1:(T - 1)],
-                dJ.du[player_inputs, t]' - λ_e[:, t, player_idx]' * df.du[:, player_inputs, t] .==
-                0
+                dJ.du[player_inputs, t]' -
+                λ_dynamics[:, t, player_idx]' * df.du[:, player_inputs, t] +
+                (λ_thrust_limits[player_inputs, t, 1] - λ_thrust_limits[player_inputs, t, 2])'
+                .== 0
             )
-            @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
+            @constraint(
+                opt_model,
+                dJ.du[player_inputs, T]' +
+                (λ_thrust_limits[player_inputs, T, 1] - λ_thrust_limits[player_inputs, T, 2])' 
+                .== 0
+            )
         else
             # Adding non-shared constraints
             # println("Adding KKT constraints to player $player_idx with no shared constraints")
@@ -835,22 +857,29 @@ function solve_inverse_game(
             @constraint(
                 opt_model,
                 [t = 2:(T - 1)],
-                dJ.dx[:, t]' + λ_e[:, t - 1, player_idx]' -
-                λ_e[:, t, player_idx]' * df.dx[:, :, t] .== 0
+                dJ.dx[:, t]' + λ_dynamics[:, t - 1, player_idx]' -
+                λ_dynamics[:, t, player_idx]' * df.dx[:, :, t] .== 0
             )
             @constraint(
                 opt_model,
-                dJ.dx[:, T]' + λ_e[:, T - 1, player_idx]' .== 0
+                dJ.dx[:, T]' + λ_dynamics[:, T - 1, player_idx]' .== 0
             ) 
 
-            # Gradient of the Lagrangian wrt u is zero
+            # Gradient of the Lagrangian wrt player's_hyperplanes own inputs is zero
             @constraint(
                 opt_model,
                 [t = 1:(T - 1)],
-                dJ.du[player_inputs, t]' - λ_e[:, t, player_idx]' * df.du[:, player_inputs, t] .==
-                0
+                dJ.du[player_inputs, t]' -
+                λ_dynamics[:, t, player_idx]' * df.du[:, player_inputs, t] +
+                (λ_thrust_limits[player_inputs, t, 1] - λ_thrust_limits[player_inputs, t, 2])'
+                .== 0
             )
-            @constraint(opt_model, dJ.du[player_inputs, T]' .== 0)
+            @constraint(
+                opt_model,
+                dJ.du[player_inputs, T]' +
+                (λ_thrust_limits[player_inputs, T, 1] - λ_thrust_limits[player_inputs, T, 2])' 
+                .== 0
+            )
         end
     
     end
@@ -865,7 +894,7 @@ function solve_inverse_game(
         # + 0.1 * sum(el -> el^2, αs)
         # + 0.001 * sum(el -> (el - ρmin)^2, ρs) 
         - regularization_weights.ρ * sum(el -> el, ρs)
-        # - sum(s)
+        # - sum(s_hyperplanes)
     )
 
     JuMPUtils.init_model_if_hasproperty!(opt_model, init, :model)
@@ -873,7 +902,7 @@ function solve_inverse_game(
     # Solve problem 
     time = @elapsed JuMP.optimize!(opt_model)
     # @info time
-    solution = merge(JuMPUtils.get_values(; x, u, λ_i, λ_e, s, ωs, αs, ρs), (; time = time, objective = JuMP.objective_value(opt_model)))
+    solution = merge(JuMPUtils.get_values(; x, u, λ_hyperplanes, λ_dynamics, s_hyperplanes, ωs, αs, ρs, s_thrust_limits, λ_thrust_limits), (; time = time, objective = JuMP.objective_value(opt_model)))
     
     JuMPUtils.isconverged(opt_model), solution, opt_model
 end

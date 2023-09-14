@@ -94,10 +94,10 @@ end
 Animation of a two-player collision avoidance game where player 1 is using a rotating hyperplane to 
 compute it's control input. 
 """
-function visualize_rotating_hyperplane(states, params) 
-    ρs = params.ρs # KoZs radius
-    ωs = params.ωs # Angular velocity of hyperplane
-    αs = params.αs # Initial angle of hyperplane
+function visualize_rotating_hyperplane(states, parameters) 
+    ρs = parameters.ρs # KoZs radius
+    ωs = parameters.ωs # Angular velocity of hyperplane
+    αs = parameters.αs # Initial angle of hyperplane
 
     # Breakout states
     states_1 = states[1:4,:]
@@ -123,7 +123,7 @@ function visualize_rotating_hyperplane(states, params)
         plot(
             [states_1[1,1:i], states_2[1,1:i]], [states_1[2,1:i], states_2[2,1:i]], 
             legend = true, 
-            title = params.title * "\nt = $i\nω = " * string(round(params.ωs[1,2], digits = 5)),
+            title = parameters.title * "\nt = $i\nω = " * string(round(parameters.ωs[1,2], digits = 5)),
             xlabel = "x", ylabel = "y", 
             size = (500,500),
             xlims = domain,
@@ -169,31 +169,35 @@ function visualize_rotating_hyperplane(states, params)
         )
 
     end
-    gif(anim, fps = 5, "rotating_hyperplane_"*params.title*".gif")
+    gif(anim, fps = 5, "rotating_hyperplane_"*parameters.title*".gif")
 end    
 
-function visualize_rotating_hyperplanes(states, params; title = "", koz = true, fps = 5) 
+function visualize_rotating_hyperplanes(states, parameters; title = "", koz = true, fps = 5) 
 
     # Useful stuff
     position_indices = vcat(
-        [[1 2] .+ (player - 1) * params.n_states_per_player for player in 1:(params.n_players)]...,
+        [[1 2] .+ (player - 1) * parameters.n_states_per_player for player in 1:(parameters.n_players)]...,
     )
-    couples = findall(params.adjacency_matrix)
-    colors = palette(:default)[1:(params.n_players)]
+    couples = findall(parameters.adjacency_matrix)
+    colors = palette(:default)[1:(parameters.n_players)]
     T = size(states,2)
 
-    # Breakout states
-    x_domain = extrema(states[position_indices[:, 1], :]) .+ (-0.01, 0.01)
-    y_domain = extrema(states[position_indices[:, 2], :]) .+ (-0.01, 0.01)
+    # Domain
+    goals_x = [parameters.goals[player][1] for player in 1:(parameters.n_players)]
+    goals_y = [parameters.goals[player][2] for player in 1:(parameters.n_players)]
+    x_domain = extrema(hcat(states[position_indices[:, 1], :], goals_x))
+    y_domain = extrema(hcat(states[position_indices[:, 2], :], goals_y))
+    x_domain = 1.1 .* x_domain
+    y_domain = 1.1 .* y_domain
     domain = [minimum([x_domain[1], y_domain[1]]), maximum([x_domain[2], y_domain[2]])]    
 
     θs = zeros(length(couples))
-    player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:params.n_players] 
-    for player_idx in 1:params.n_players
+    player_couples = [findall(couple -> couple[1] == player_idx, couples) for player_idx in 1:parameters.n_players] 
+    for player_idx in 1:parameters.n_players
         for (couple_idx, couple) in enumerate(couples[player_couples[player_idx]])
             parameter_idx = player_couples[player_idx][couple_idx]
-            idx_ego   = (1:2) .+ (couple[1] - 1)*params.n_states_per_player
-            idx_other = (1:2) .+ (couple[2] - 1)*params.n_states_per_player
+            idx_ego   = (1:2) .+ (couple[1] - 1)*parameters.n_states_per_player
+            idx_other = (1:2) .+ (couple[2] - 1)*parameters.n_states_per_player
             x_ego   = states[idx_ego,1]
             x_other = states[idx_other,1]
             x_diff  = x_ego - x_other
@@ -205,7 +209,7 @@ function visualize_rotating_hyperplanes(states, params; title = "", koz = true, 
 
     # Define useful vectors
     function n(t, θ, α, ω)
-        [cos(θ + α + ω * (t - 1) * params.ΔT), sin(θ + α + ω * (t - 1) * params.ΔT)]
+        [cos(θ + α + ω * (t - 1) * parameters.ΔT), sin(θ + α + ω * (t - 1) * parameters.ΔT)]
     end
 
     function n0(couple, states, position_indices)
@@ -217,19 +221,19 @@ function visualize_rotating_hyperplanes(states, params; title = "", koz = true, 
         # Plot trajectories
         Plots.plot(; legend = false, title = title, xlabel = "x", ylabel = "y", size = (500, 500))
         Plots.plot!(
-            [states[position_indices[player, 1], 1:i] for player in 1:(params.n_players)],
-            [states[position_indices[player, 2], 1:i] for player in 1:(params.n_players)]
+            [states[position_indices[player, 1], 1:i] for player in 1:(parameters.n_players)],
+            [states[position_indices[player, 2], 1:i] for player in 1:(parameters.n_players)]
         )
         Plots.scatter!(
-            [states[position_indices[player, 1], i] for player in 1:(params.n_players)],
-            [states[position_indices[player, 2], i] for player in 1:(params.n_players)],
+            [states[position_indices[player, 1], i] for player in 1:(parameters.n_players)],
+            [states[position_indices[player, 2], i] for player in 1:(parameters.n_players)],
             markersize = 5,
             color = colors,
         )
-        # plot goals from params info with an x
+        # plot goals from parameters info with an x
         Plots.scatter!(
-            [params.goals[player][1] for player in 1:(params.n_players)],
-            [params.goals[player][2] for player in 1:(params.n_players)],
+            [parameters.goals[player][1] for player in 1:(parameters.n_players)],
+            [parameters.goals[player][2] for player in 1:(parameters.n_players)],
             markersize = 5,
             marker = :star4,
             color = colors,
@@ -240,8 +244,8 @@ function visualize_rotating_hyperplanes(states, params; title = "", koz = true, 
             if koz
                 # Plot KoZs around hyperplane owner
                 Plots.plot!(
-                    [states[position_indices[couple[2], 1], i] + params.ρs[couple_idx] * cos(θ) for θ in range(0,stop=2π,length=100)], 
-                    [states[position_indices[couple[2], 2], i] + params.ρs[couple_idx] * sin(θ) for θ in range(0,stop=2π,length=100)], 
+                    [states[position_indices[couple[2], 1], i] + parameters.ρs[couple_idx] * cos(θ) for θ in range(0,stop=2π,length=100)], 
+                    [states[position_indices[couple[2], 2], i] + parameters.ρs[couple_idx] * sin(θ) for θ in range(0,stop=2π,length=100)], 
                     color = colors[couple[1]], 
                     legend = false,
                     fillalpha = 0.1,
@@ -250,8 +254,8 @@ function visualize_rotating_hyperplanes(states, params; title = "", koz = true, 
             end
             # Plot hyperplane normal
             ni =
-                params.ρs[couple_idx] *
-                n(i, θs[couple_idx], params.αs[couple_idx], params.ωs[couple_idx])
+                parameters.ρs[couple_idx] *
+                n(i, θs[couple_idx], parameters.αs[couple_idx], parameters.ωs[couple_idx])
             Plots.plot!(
                 [states[position_indices[couple[2], 1], i], states[position_indices[couple[2], 1], i] + ni[1]],
                 [states[position_indices[couple[2], 2], i], states[position_indices[couple[2], 2], i] + ni[2]],
@@ -274,14 +278,14 @@ function visualize_rotating_hyperplanes(states, params; title = "", koz = true, 
     gif(anim, fps = fps, "rotating_hyperplanes_"*title*".gif")
 end    
 
-function visualize_obs_pred(states, T_obs, params; koz = true, fps = 5) 
+function visualize_obs_pred(states, T_obs, parameters; koz = true, fps = 5) 
 
     # Useful stuff
     position_indices = vcat(
-        [[1 2] .+ (player - 1) * params.n_states_per_player for player in 1:(params.n_players)]...,
+        [[1 2] .+ (player - 1) * parameters.n_states_per_player for player in 1:(parameters.n_players)]...,
     )
-    couples = findall(params.adj_mat)
-    colors = palette(:default)[1:(params.n_players)]
+    couples = findall(parameters.adj_mat)
+    colors = palette(:default)[1:(parameters.n_players)]
     T = size(states,2)
 
     # Domain
@@ -302,9 +306,9 @@ function visualize_obs_pred(states, T_obs, params; koz = true, fps = 5)
     anim = @animate for i = 1:T
 
         if i <= T_obs
-            title = "$(params.title)\n t = " *string(round(i*params.ΔT; digits = 2)) * "/" * string(round(params.ΔT*T; digits = 2)) * "s" *"\nmode: observing"
+            title = "$(parameters.title)\n t = " *string(round(i*parameters.ΔT; digits = 2)) * "/" * string(round(parameters.ΔT*T; digits = 2)) * "s" *"\nmode: observing"
         else
-            title = "$(params.title)\n t = " *string(round(i*params.ΔT; digits = 2)) * "/" * string(round(params.ΔT*T; digits = 2)) * "s" *"\nmode: predicting"
+            title = "$(parameters.title)\n t = " *string(round(i*parameters.ΔT; digits = 2)) * "/" * string(round(parameters.ΔT*T; digits = 2)) * "s" *"\nmode: predicting"
         end
 
         # Plot trajectories
@@ -312,35 +316,35 @@ function visualize_obs_pred(states, T_obs, params; koz = true, fps = 5)
         
         if i <= T_obs 
             plot!(
-                [states[position_indices[player, 1], 1:i] for player in 1:(params.n_players)],
-                [states[position_indices[player, 2], 1:i] for player in 1:(params.n_players)]
+                [states[position_indices[player, 1], 1:i] for player in 1:(parameters.n_players)],
+                [states[position_indices[player, 2], 1:i] for player in 1:(parameters.n_players)]
             )
             scatter!(
-                [states[position_indices[player, 1], i] for player in 1:(params.n_players)],
-                [states[position_indices[player, 2], i] for player in 1:(params.n_players)],
+                [states[position_indices[player, 1], i] for player in 1:(parameters.n_players)],
+                [states[position_indices[player, 2], i] for player in 1:(parameters.n_players)],
                 markersize = 5,
                 color = colors,
             )
         else
             plot!(
-                [states[position_indices[player, 1], 1:T_obs] for player in 1:(params.n_players)],
-                [states[position_indices[player, 2], 1:T_obs] for player in 1:(params.n_players)], 
+                [states[position_indices[player, 1], 1:T_obs] for player in 1:(parameters.n_players)],
+                [states[position_indices[player, 2], 1:T_obs] for player in 1:(parameters.n_players)], 
                 linestyle = :solid,
             )
             plot!(
-                [states[position_indices[player, 1], T_obs:i] for player in 1:(params.n_players)],
-                [states[position_indices[player, 2], T_obs:i] for player in 1:(params.n_players)], 
+                [states[position_indices[player, 1], T_obs:i] for player in 1:(parameters.n_players)],
+                [states[position_indices[player, 2], T_obs:i] for player in 1:(parameters.n_players)], 
                 linestyle = :dash,
             )
             scatter!(
-                [states[position_indices[player, 1], T_obs] for player in 1:(params.n_players)],
-                [states[position_indices[player, 2], T_obs] for player in 1:(params.n_players)],
+                [states[position_indices[player, 1], T_obs] for player in 1:(parameters.n_players)],
+                [states[position_indices[player, 2], T_obs] for player in 1:(parameters.n_players)],
                 markersize = 5,
                 color = colors,
             )
             scatter!(
-                [states[position_indices[player, 1], i] for player in 1:(params.n_players)],
-                [states[position_indices[player, 2], i] for player in 1:(params.n_players)],
+                [states[position_indices[player, 1], i] for player in 1:(parameters.n_players)],
+                [states[position_indices[player, 2], i] for player in 1:(parameters.n_players)],
                 markersize = 5,
                 markerstrokealpha = 1.0,
                 markeralpha = 0.5,
@@ -354,8 +358,8 @@ function visualize_obs_pred(states, T_obs, params; koz = true, fps = 5)
             if koz
                 # Plot KoZs around hyperplane owner
                 plot!(
-                    [states[position_indices[couple[2], 1], i] + params.ρs[couple[1], couple[2]] * cos(θ) for θ in range(0,stop=2π,length=100)], 
-                    [states[position_indices[couple[2], 2], i] + params.ρs[couple[1], couple[2]] * sin(θ) for θ in range(0,stop=2π,length=100)], 
+                    [states[position_indices[couple[2], 1], i] + parameters.ρs[couple[1], couple[2]] * cos(θ) for θ in range(0,stop=2π,length=100)], 
+                    [states[position_indices[couple[2], 2], i] + parameters.ρs[couple[1], couple[2]] * sin(θ) for θ in range(0,stop=2π,length=100)], 
                     color = colors[couple[1]], 
                     legend = false,
                     linealpha = 0.0,
@@ -365,8 +369,8 @@ function visualize_obs_pred(states, T_obs, params; koz = true, fps = 5)
             end
             # Plot hyperplane normal
             ni =
-                params.ρs[couple[1], couple[2]] *
-                n(i, params.αs[couple[1], couple[2]], params.ωs[couple[1], couple[2]])
+                parameters.ρs[couple[1], couple[2]] *
+                n(i, parameters.αs[couple[1], couple[2]], parameters.ωs[couple[1], couple[2]])
             # plot!(
             #     [states[position_indices[couple[2], 1], i], states[position_indices[couple[2], 1], i] + ni[1]],
             #     [states[position_indices[couple[2], 2], i], states[position_indices[couple[2], 2], i] + ni[2]],
@@ -388,12 +392,12 @@ function visualize_obs_pred(states, T_obs, params; koz = true, fps = 5)
         plot!(xlims = domain,
               ylims = domain)
     end
-    gif(anim, fps = fps, "obs_pred_"*params.title*".gif")
+    gif(anim, fps = fps, "obs_pred_"*parameters.title*".gif")
 end    
 
-function animate_trajectory(states, params; fps = 5)
+function animate_trajectory(states, parameters; fps = 5)
     position_indices = vcat(
-        [[1 2] .+ (player - 1) * params.n_states_per_player for player in 1:(params.n_players)]...,
+        [[1 2] .+ (player - 1) * parameters.n_states_per_player for player in 1:(parameters.n_players)]...,
     )
 
     # Plot limits
@@ -403,17 +407,17 @@ function animate_trajectory(states, params; fps = 5)
     domain = [minimum([x_domain[1], y_domain[1]]), maximum([x_domain[2], y_domain[2]])]
 
     T = size(states, 2)
-    colors = palette(:default)[1:(params.n_players)]
+    colors = palette(:default)[1:(parameters.n_players)]
 
     # Animation of trajectory 
     anim = Plots.@animate for i in 1:T
 
         # Plot trajectories
         Plots.plot(
-            [states[position_indices[player, 1], 1:i] for player in 1:(params.n_players)],
-            [states[position_indices[player, 2], 1:i] for player in 1:(params.n_players)],
+            [states[position_indices[player, 1], 1:i] for player in 1:(parameters.n_players)],
+            [states[position_indices[player, 2], 1:i] for player in 1:(parameters.n_players)],
             legend = false,
-            title = params.title * "\nt = " *string(round(i*params.ΔT; digits = 2)) * "/" * string(params.ΔT*T) * "s",
+            title = parameters.title * "\nt = " *string(round(i*parameters.ΔT; digits = 2)) * "/" * string(parameters.ΔT*T) * "s",
             xlabel = "x",
             ylabel = "y",
             size = (500, 500),
@@ -421,15 +425,15 @@ function animate_trajectory(states, params; fps = 5)
             ylims = domain,
         )
         Plots.scatter!(
-            [states[position_indices[player, 1], i] for player in 1:(params.n_players)],
-            [states[position_indices[player, 2], i] for player in 1:(params.n_players)],
+            [states[position_indices[player, 1], i] for player in 1:(parameters.n_players)],
+            [states[position_indices[player, 2], i] for player in 1:(parameters.n_players)],
             markersize = 5,
             color = colors,
         )
         # Plot goals    
         Plots.scatter!(
-            [params.goals[player][1] for player in 1:(params.n_players)],
-            [params.goals[player][2] for player in 1:(params.n_players)],
+            [parameters.goals[player][1] for player in 1:(parameters.n_players)],
+            [parameters.goals[player][2] for player in 1:(parameters.n_players)],
             markersize = 10,
             marker = :star4,
             color = colors,
@@ -438,7 +442,7 @@ function animate_trajectory(states, params; fps = 5)
         # Set domain
         Plots.plot!(xlims = domain, ylims = domain)
     end
-    Plots.gif(anim, fps = fps, params.title * ".gif")
+    Plots.gif(anim, fps = fps, parameters.title * ".gif")
 end
 
 "Plot trajectory comparison in two-dimensions, since this is where hyperplanes live"
@@ -620,14 +624,20 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
         [[1 2 3] .+ (player - 1) * parameters.n_states_per_player for player in 1:(parameters.n_players)]...,
     )
 
-    if hyperplane
-        extra = maximum(parameters.ρs) + 0.05
-    else
-        extra = 0.1
-    end
-    x_domain = extrema(states[position_indices[:, 1], :]) .+ (-extra, extra)
-    y_domain = extrema(states[position_indices[:, 2], :]) .+ (-extra, extra)
-    z_domain = extrema(states[position_indices[:, 3], :]) .+ (-extra, extra)
+    # if hyperplane
+    #     extra = maximum(parameters.ρs) + 0.05
+    # else
+    #     extra = 0.1
+    # end
+    goals_x = [parameters.goals[player][1] for player in 1:(parameters.n_players)]
+    goals_y = [parameters.goals[player][2] for player in 1:(parameters.n_players)]
+    goals_z = [parameters.goals[player][3] for player in 1:(parameters.n_players)]
+    x_domain = extrema(hcat(states[position_indices[:, 1], :], goals_x))
+    y_domain = extrema(hcat(states[position_indices[:, 2], :], goals_y))
+    z_domain = extrema(hcat(states[position_indices[:, 3], :], goals_z))
+    x_domain = 1.1 .* x_domain
+    y_domain = 1.1 .* y_domain
+    z_domain = 1.1 .* z_domain
     xy_domain = [minimum([x_domain[1], y_domain[1]]), maximum([x_domain[2], y_domain[2]])]
 
     # Setup observables

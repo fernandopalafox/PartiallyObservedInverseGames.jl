@@ -183,6 +183,8 @@ function solve_game(
     JuMPUtils.init_if_hasproperty!(x, init, :x)
     JuMPUtils.init_if_hasproperty!(u, init, :u)
     JuMPUtils.init_if_hasproperty!(λ_dynamics, init,:λ_dynamics)
+    JuMPUtils.init_if_hasproperty!(s_thrust_limits, init, :s_thrust_limits)
+    JuMPUtils.init_if_hasproperty!(λ_thrust_limits, init, :λ_thrust_limits)
 
     # ---- Setup constraints ----
 
@@ -227,8 +229,23 @@ function solve_game(
         end
 
         # Vanishing Lagrangian wrt s_thrust_limits
-        @constraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], -player_s[control_idx, t, 1] * player_λ[control_idx, t , 1] - μ == 0)
-        @constraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], -player_s[control_idx, t, 2] * player_λ[control_idx, t , 2] - μ == 0)
+        # @constraint(
+        #     opt_model,
+        #     [t = 1:T, control_idx = 1:player_n_controls],
+        #     -player_s[control_idx, t, 1] * player_λ[control_idx, t, 1] - μ == 0
+        # )
+        # @constraint(
+        #     opt_model,
+        #     [t = 1:T, control_idx = 1:player_n_controls],
+        #     -player_s[control_idx, t, 2] * player_λ[control_idx, t, 2] - μ == 0
+        # )
+        s_player_inv_1 = @variable(opt_model, [t = 1:T, control_idx = 1:player_n_controls])
+        s_player_inv_2 = @variable(opt_model, [t = 1:T, control_idx = 1:player_n_controls])
+        @NLconstraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], s_player_inv_1[t, control_idx] == 1 / player_s[control_idx, t, 1])
+        @NLconstraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], s_player_inv_2[t, control_idx] == 1 / player_s[control_idx, t, 2])
+        @constraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], -μ * s_player_inv_1[t, control_idx] - player_λ[control_idx, t, 1] == 0)
+        @constraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], -μ * s_player_inv_2[t, control_idx] - player_λ[control_idx, t, 2] == 0)
+
     end
 
     # KKT conditions
@@ -294,13 +311,13 @@ function solve_game(
                     # println("   Adding shared constraint feasiblity for couple $couple_idx_global: $couple")
 
                     # ∇ₛL = -μ * s⁻¹ - λ_hyperplanes = 0
-                    # s_couple_inv = @variable(opt_model, [t = 2:T])
-                    # @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s_hyperplanes[couple_idx_global, t])
-                    # @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_hyperplanes[couple_idx_global, t] == 0)
+                    s_couple_inv = @variable(opt_model, [t = 2:T])
+                    @NLconstraint(opt_model, [t = 2:T], s_couple_inv[t] == 1 / s_hyperplanes[couple_idx_global, t])
+                    @constraint(opt_model, [t = 2:T], -μ * s_couple_inv[t] - λ_hyperplanes[couple_idx_global, t] == 0)
 
                     # Equation 19.5b) in Ch.19 of Nocedal and Wright 
-                    @constraint(opt_model, [t = 2:T], -s_hyperplanes[couple_idx_global, t] * λ_hyperplanes[couple_idx_global, t] - μ == 0)
-                    @warn "verify gradient of lagrangian is correct"
+                    # @constraint(opt_model, [t = 2:T], -s_hyperplanes[couple_idx_global, t] * λ_hyperplanes[couple_idx_global, t] - μ == 0)
+                    # @warn "verify gradient of lagrangian is correct"
                 end   
             end
             dhdx = vcat(dhdx_container...)
@@ -377,7 +394,7 @@ function solve_game(
     # Solve problem 
     time = @elapsed JuMP.optimize!(opt_model)
     # @info time
-    n_couples > 0 ? solution = JuMPUtils.get_values(; x, u, λ_hyperplanes, λ_dynamics, s_hyperplanes) : solution = JuMPUtils.get_values(; x, u, λ_dynamics)
+    n_couples > 0 ? solution = JuMPUtils.get_values(; x, u, λ_hyperplanes, λ_dynamics, s_hyperplanes, s_thrust_limits, λ_thrust_limits) : solution = JuMPUtils.get_values(; x, u, λ_dynamics, s_thrust_limits, λ_thrust_limits)
 
     # Print out difference of solved initial state vs. nominal initial state
     # println("Maximum error in initial state = $(maximum(abs.(solution.x[:,1] - x0[:,1])))")

@@ -15,7 +15,7 @@ using UnPack: @unpack
 using PartiallyObservedInverseGames.TrajectoryVisualization: visualize_rotating_hyperplanes, animate_trajectory
 using PartiallyObservedInverseGames.CostUtils
 using PartiallyObservedInverseGames.JuMPUtils
-using PartiallyObservedInverseGames.InverseGames: solve_inverse_game, InverseHyperplaneSolver, InverseWeightSolver
+using PartiallyObservedInverseGames.InverseGames: solve_inverse_game, InverseHyperplaneSolver
 using PartiallyObservedInverseGames.ForwardGame: KKTGameSolver, KKTGameSolverBarrier, solve_game
 using Random 
 # using Plots
@@ -25,54 +25,52 @@ using GLMakie
 
 include("../experiments/utils/misc.jl")
 
+"Setup game, solver, and Monte Carlo analysis"
 function setup()
     # ---- Parameters ---- 
     
     # Game 
-    ΔT = 0.1
     n_players = 2
-    n_states_per_player = 4
+    n_states_per_player = 4 # in 2D
+    scale = 100
     
-    # Initial state
+    # Initial 
     v_init = 0.0
+    os_v = deg2rad(0) # init. angle offset
+    os_init = pi/2 # init. angle offset
     as = [0.0, pi/2]
-    # as = [0.0, 2*pi/3, 4*pi/3]
-    os = deg2rad(0)
+
+    # Dynamics 
+    ΔT = 5.0
+    t_real = 210.0
+    m   = 100.0 # kg
+    r₀ = (400 + 6378.137) # km
+    grav_param  = 398600.4418 # km^3/s^2
+    n = sqrt(grav_param/(r₀^3)) # rad/s
+    u_max = 1.0
+    control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m, u_max) for _ in 1:n_players])
     
-    # Hyperplane stuff
+    # Hyperplane 
     adjacency_matrix = [false true;
                         false false]
-    ωs = 0.3
+    ωs = 0.01
     αs = 0.0
-    ρs = 10.0
+    ρs = 25.0
 
-    # adjacency_matrix = [false true true; 
-    #                     false false true;
-    #                     false false false]
-    # ωs = [0.3, 0.3, 0.3]
-    # αs = [0.0, 0.0, 0.0]
-    # ρs = [10.0, 10.0, 10.0] 
-
-    # Costs function parameters
-    scale = 100
-    t_real = 7.0
+    # Costs function 
     t_real_activate_goalcost = t_real
-    weights = repeat([0.9 0.1], outer = n_players)
+    weights = repeat([10.0 0.0001], outer = n_players) # from forward game 
     
-    # Solver  
-    # μs = [0.1, 0.01, 0.005, 0.001]
-    # μs = [1.0, 0.1, 0.01, 0.005, 0.001]
-    # μs = [100.0, 10.0, 1.0, 0.1]
-    μs = [25.0, 10.0, 1.0, 0.1]
-    ρmin = 2.0
+    # Inverse Solver  
+    μs = [1000.0, 100.0, 50.0, 10.0, 1.0, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05]
+    parameter_bounds = (; ω = (0.0, 0.1), α = (0.0, 0.0), ρ = (10.0, scale/2.0))
+    regularization_weights = (; ρ = 0.01)
     max_wall_time = 15.0
 
-    # noise
+    # Noise 
     rng = MersenneTwister(0)
 
     # ---- Setup system and costs ----
-    control_system = TestDynamics.ProductSystem([TestDynamics.DoubleIntegrator(ΔT) for _ in 1:n_players])
-
     T = Int(t_real / ΔT)
     T_activate_goalcost = Int(t_real_activate_goalcost / ΔT)
     player_cost_models = map(enumerate(as)) do (ii, a)
@@ -90,7 +88,7 @@ function setup()
 
     x0 = vcat(
     [
-        vcat(-scale*unitvector(a), [v_init*cos(a - os), v_init*sin(a - os)]) for
+        vcat(-scale*unitvector(a), [v_init*cos(a - os_v), v_init*sin(a - os_v)]) for
         a in as
     ]...,
     )
@@ -99,9 +97,6 @@ function setup()
         ΔT,
         n_players,
         n_states_per_player,
-        v_init,
-        as,
-        os,
         adjacency_matrix,
         ωs,
         αs,
@@ -112,24 +107,23 @@ function setup()
         T,
         weights,
         μs,
-        ρmin,
         max_wall_time,
         rng,
         control_system,
         player_cost_models,
-        x0
+        x0, 
+        parameter_bounds,
+        regularization_weights
     )
 end
 
+"Run forward game"
 function forward(game_setup)
 
     # Unpack 
     @unpack ΔT,
     n_players,
     n_states_per_player,
-    v_init,
-    as,
-    os,
     adjacency_matrix,
     ωs,
     αs,
@@ -140,7 +134,6 @@ function forward(game_setup)
     T, 
     weights,
     μs,
-    ρmin,
     max_wall_time,
     rng,
     control_system, 
@@ -160,22 +153,27 @@ function forward(game_setup)
         solver_attributes = (; max_wall_time, print_level = 5),
     )
 
+    # Print maximum control effort in kkt solution  
+    # println("Maximum control effort in kkt solution: ", maximum(abs.(solution_kkt.u)))
+
     # Solve forward game with hyperplane constraints
     constraint_parameters = (;adjacency_matrix, ωs = ωs, αs = αs, ρs = ρs) 
-    converged_forward, _, solution_forward, model_forward = solve_game(
-        KKTGameSolverBarrier(),
-        control_system,
-        player_cost_models,
-        x0,
-        constraint_parameters,
-        T;
-        # init = (; s = 1.5*scale, x = solution_kkt.x, u = solution_kkt.u),
-        init = (; s = 1.5*scale, x = solution_kkt.x, u = solution_kkt.u),
-        solver = Ipopt.Optimizer,
-        solver_attributes = (; max_wall_time, print_level = 2),
-        μ = μs[1],
-    )
+    converged_forward, time_forward, solution_forward, model_forward = 
+            solve_game(KKTGameSolverBarrier(), control_system, player_cost_models, x0, constraint_parameters, T;
+            init = (;
+                s_hyperplanes = 1.5 * scale,
+                x = solution_kkt.x,
+                u = solution_kkt.u,
+                λ_dynamics = solution_kkt.λ,
+                s_thrust_limits = 1.0,
+                λ_thrust_limits = μs[1], 
+            ),
+            solver = Ipopt.Optimizer,
+            solver_attributes = (; max_wall_time, print_level = 5),
+            μ = μs[1]
+            )
 
+    # Plot in case it didn't converge
     if converged_forward == false
         println("Forward game did not converge")
         visualize_rotating_hyperplanes(     
@@ -215,6 +213,7 @@ function forward(game_setup)
         println("Converged at μ = ", μs[1])
     end
 
+    # Run annealing
     solution_new = solution_forward
     model_new = model_forward
     for μ in μs[2:end]
@@ -228,7 +227,7 @@ function forward(game_setup)
             init = (;model = model_new, solution_new...),
             solver = Ipopt.Optimizer,
             solver_attributes = (; max_wall_time, print_level = 1),
-            μ,
+            μ
         )
 
         if !converged_forward
@@ -245,19 +244,17 @@ function forward(game_setup)
     solution_forward = solution_new
     model_forward = model_new
 
-    @assert minimum(solution_forward.s.data) ≥ 0 "Negative slacks"
-
-    # Visualize 
+    # Visualize final solution
     visualize_rotating_hyperplanes(     
             solution_kkt.x,
             (;
-                ΔT = 0.1,
+                ΔT,
                 adjacency_matrix = zeros(Bool, n_players, n_players),
                 ωs = constraint_parameters.ωs,
                 αs = constraint_parameters.αs,
                 ρs = constraint_parameters.ρs,
-                n_players = 2,
-                n_states_per_player = 4,
+                n_players,
+                n_states_per_player,
                 goals = [player_cost_models[i].goal_position for i in 1:n_players],
             );
             title = "forward_kkt",
@@ -267,16 +264,16 @@ function forward(game_setup)
     visualize_rotating_hyperplanes(
             solution_forward.x,
             (;
-                ΔT = 0.1,
-                adjacency_matrix = adjacency_matrix,
+                ΔT,
+                adjacency_matrix,
                 ωs = constraint_parameters.ωs,
                 αs = constraint_parameters.αs,
                 ρs = constraint_parameters.ρs,
-                n_players = 2,
-                n_states_per_player = 4,
+                n_players,
+                n_states_per_player,
                 goals = [player_cost_models[i].goal_position for i in 1:n_players],
             );
-            title = "forward",
+            title = "forward_hyp",
             koz = true,
             fps = 10.0,
         )
@@ -285,15 +282,13 @@ function forward(game_setup)
 
 end
 
+"Run inverse game for a given observation"
 function inverse(observation, game_setup)
 
     # Unpack parameters
     @unpack ΔT,
     n_players,
     n_states_per_player,
-    v_init,
-    as,
-    os,
     adjacency_matrix,
     ωs,
     αs,
@@ -304,12 +299,13 @@ function inverse(observation, game_setup)
     T,
     weights,
     μs,
-    ρmin,
     max_wall_time,
     rng,
     control_system,
     player_cost_models,
-    x0 = game_setup
+    x0,
+    parameter_bounds,
+    regularization_weights = game_setup
 
     # ---- Inverse w/ noise ----
 
@@ -326,17 +322,18 @@ function inverse(observation, game_setup)
 
     # Solve inverse game
     converged_inverse, solution_inverse, model_inverse = solve_inverse_game(
-            InverseHyperplaneSolver(),
-            observation, 
-            adjacency_matrix;
-            control_system,
-            player_cost_models,
-            init = (;s = 1.5*scale, x = solution_kkt.x, u = solution_kkt.u, λ_e = solution_kkt.λ),
-            solver = Ipopt.Optimizer,
-            solver_attributes = (; max_wall_time, print_level = 1),
-            ρmin,
-            μ = μs[1],
-        )
+        InverseHyperplaneSolver(),
+        observation, 
+        adjacency_matrix;
+        control_system,
+        player_cost_models,
+        init = (;s_hyperplanes = 1.5*scale, x = observation.x, u = observation.u, λ_dynamics = solution_kkt.λ),
+        solver = Ipopt.Optimizer,
+        solver_attributes = (; max_wall_time, print_level = 5),
+        μ = μs[1],
+        parameter_bounds, 
+        regularization_weights,
+    )
     if !converged_inverse
         println("       Inverse game did not converge at μ[1] = ", μs[1])
  
@@ -493,16 +490,13 @@ function inverse(observation, game_setup)
     return converged_inverse, solution_inverse
 end
 
+"Run Monte Carlo simulation for noise levels"
 function mc(trials, game_setup, solution_forward)
 
     @unpack rng = game_setup
 
     # ---- Noise levels ----
-    # noise_levels = unique([0:0.001:0.01; 0.01:0.005:0.03; 0.03:0.01:0.1])
     noise_levels = 0.0:0.1:2.5
-    # noise_levels = [2.4, 2.5]
-    # noise_levels = [5.0,6.0]
-    # noise_levels = 0.0
 
     # ---- Monte Carlo ----
     println("Starting Monte Carlo for ", length(noise_levels), " noise levels and ", trials, " trials each.")
@@ -590,8 +584,6 @@ function mc(trials, game_setup, solution_forward)
         )
     end 
 
-    
-
     # ---- Save results ----
     df = DataFrame(
         noise_level = results[:, 1],
@@ -602,7 +594,7 @@ function mc(trials, game_setup, solution_forward)
         reconstruction_error = results[:, 6],
         time = results[:, 7],
     )
-    CSV.write("mcresults.csv", df, header = false)
+    CSV.write("mc_noise.csv", df, header = false)
 
     try
         plotmc(results, noise_levels, game_setup)

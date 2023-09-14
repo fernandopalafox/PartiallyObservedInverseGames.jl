@@ -27,7 +27,7 @@ let
 n_players = 3
 n_states_per_player = 4
 scale = 100
-t_real = 200.0
+t_real = 210.0
 t_real_activate_goalcost = t_real
 
 weights = repeat([0.1 10.0 0.0001], outer = n_players) # works well enough 
@@ -44,7 +44,7 @@ grav_parameter  = 398600.4418 # km^3/s^2
 
 n = sqrt(grav_parameter/(r₀^3)) # rad/s
 
-u_max = 1.0
+u_max = 1.5
 
 μs = [10.0, 1.0, 0.1, 0.01, 0.001, 0.0001]
 
