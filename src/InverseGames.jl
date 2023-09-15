@@ -676,9 +676,9 @@ function solve_inverse_game(
 
     # Decision variables
     if !isnothing(adjacency_matrix) && n_couples > 0
-        ωs = @variable(opt_model, [1:n_couples], lower_bound = parameter_bounds.ω[1], upper_bound = parameter_bounds.ω[2], start = 0.2)
-        αs = @variable(opt_model, [1:n_couples], lower_bound = parameter_bounds.α[1], upper_bound = parameter_bounds.α[2], start = 0.0)
-        ρs = @variable(opt_model, [1:n_couples], lower_bound = parameter_bounds.ρ[1], upper_bound = parameter_bounds.ρ[2], start = parameter_bounds.ρ[1])
+        ωs = @variable(opt_model, [1:n_couples], lower_bound = parameter_bounds.ω[1], upper_bound = parameter_bounds.ω[2], start = parameter_bounds.ω[2] - parameter_bounds.ω[1])
+        αs = @variable(opt_model, [1:n_couples], lower_bound = parameter_bounds.α[1], upper_bound = parameter_bounds.α[2], start = parameter_bounds.α[2] - parameter_bounds.α[1])
+        ρs = @variable(opt_model, [1:n_couples], lower_bound = parameter_bounds.ρ[1], upper_bound = parameter_bounds.ρ[2], start = parameter_bounds.ρ[2] - parameter_bounds.ρ[1])
         constraint_parameters = (; adjacency_matrix, ωs, αs, ρs)
 
         couples = findall(constraint_parameters.adjacency_matrix)
@@ -747,8 +747,12 @@ function solve_inverse_game(
         end
 
         # Vanishing Lagrangian wrt s_thrust_limits
-        @constraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], -player_s[control_idx, t, 1] * player_λ[control_idx, t , 1] - μ == 0)
-        @constraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], -player_s[control_idx, t, 2] * player_λ[control_idx, t , 2] - μ == 0)
+        s_player_inv_1 = @variable(opt_model, [t = 1:T, control_idx = 1:player_n_controls])
+        s_player_inv_2 = @variable(opt_model, [t = 1:T, control_idx = 1:player_n_controls])
+        @NLconstraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], s_player_inv_1[t, control_idx] == 1 / player_s[control_idx, t, 1])
+        @NLconstraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], s_player_inv_2[t, control_idx] == 1 / player_s[control_idx, t, 2])
+        @constraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], -μ * s_player_inv_1[t, control_idx] - player_λ[control_idx, t, 1] == 0)
+        @constraint(opt_model, [t = 1:T, control_idx = 1:player_n_controls], -μ * s_player_inv_2[t, control_idx] - player_λ[control_idx, t, 2] == 0)
     end
 
     # KKT conditions
