@@ -43,6 +43,8 @@ function DynamicsModelInterface.add_dynamics_constraints!(system::Unicycle, opt_
             x[4, t] + u[2, t],
         ]
     )
+
+    # @constraint(opt_model, x[:, T] == xg)
 end
 
 function DynamicsModelInterface.add_dynamics_jacobians!(system::Unicycle, opt_model, x, u)

@@ -9,13 +9,12 @@ function estimate(
     estimator_name = (expected_observation === identity ? "Ours Full" : "Ours Partial"),
     solver_kwargs...,
 )
-
-    @showprogress pmap(enumerate(dataset)) do (observation_idx, d)
+    @showprogress pmap(dataset) do d
         observation_model = (; d.σ, expected_observation)
 
         converged, estimate, opt_model = solve_inverse_game(
             solver,
-            expected_observation(d.x);
+            expected_observation(d.observation.x);
             control_system,
             observation_model,
             player_cost_models,
@@ -23,12 +22,42 @@ function estimate(
             solver_kwargs...,
             # NOTE: This estimator does not use any information beyond the state observation!
         )
-        converged || @warn "conKKT did not converge on observation $observation_idx."
+        converged || @warn "conKKT did not converge on observation $(d.idx)."
 
-        merge(estimate, (; converged, observation_idx, estimator_name))
+        (; d..., estimate, converged, estimator_name)
     end
 end
 
+function estimate(
+    solver::AugmentedInverseKKTResidualSolver;
+    dataset,
+    control_system,
+    player_cost_models,
+    solver_attributes,
+    expected_observation = identity,
+    estimator_name = (expected_observation === identity ? "Baseline Full" : "Baseline Partial"),
+    solver_kwargs...,
+)
+    @showprogress pmap(dataset) do d
+        observation_model = (; d.σ, expected_observation)
+
+        converged, estimate, opt_model = solve_inverse_game(
+            solver,
+            expected_observation(d.observation.x);
+            control_system,
+            observation_model,
+            player_cost_models,
+            solver_attributes,
+            solver_kwargs...,
+            # NOTE: This estimator does not use any information beyond the state observation!
+        )
+        converged || @warn "resKKT did not converge on observation $(d.idx)."
+
+        (; d..., estimate, converged, estimator_name)
+    end
+end
+
+# TODO: maybe get rid of this (use `AugmentedInverseKKTResidualSolver` instead)
 function estimate(
     solver::InverseKKTResidualSolver;
     dataset,
@@ -37,25 +66,29 @@ function estimate(
     solver_attributes,
     expected_observation = identity,
     estimator_name = (expected_observation === identity ? "Baseline Full" : "Baseline Partial"),
+    pre_solve_kwargs = (;),
 )
-    @showprogress pmap(enumerate(dataset)) do (observation_idx, d)
+    @showprogress pmap(dataset) do d
         observation_model = (; d.σ, expected_observation)
+        local smooth_model
         smoothed_observation = let
-            pre_solve_converged, pre_solve_solution = InversePreSolve.pre_solve(
+            pre_solve_converged, pre_solve_solution, smooth_model = InversePreSolve.pre_solve(
                 # pre-filter for baseline receives one extra state observation to avoid
                 # unobservability of the velocity at the end-point.
-                expected_observation([d.x d.x_extra]),
+                # TODO: allow to disable this
+                expected_observation([d.observation.x d.observation.x_extra]),
                 nothing;
                 control_system,
                 observation_model,
                 solver_attributes,
+                pre_solve_kwargs...,
             )
             @assert pre_solve_converged
             # Filtered sequence is truncated to the original length to give all methods the same
             # number of data-points for inference.
             (;
-                x = pre_solve_solution.x[:, 1:size(d.x, 2)],
-                u = pre_solve_solution.u[:, 1:size(d.u, 2)],
+                x = pre_solve_solution.x[:, 1:size(d.observation.x, 2)],
+                u = pre_solve_solution.u[:, 1:size(d.observation.u, 2)],
             )
         end
 
@@ -67,9 +100,8 @@ function estimate(
             player_cost_models,
             solver_attributes,
         )
-        converged || @warn "resKKT did not converge on observation $observation_idx."
+        converged || @warn "resKKT did not converge on observation $(d.idx)."
 
-        merge(estimate, (; converged, observation_idx, estimator_name, smoothed_observation))
+        (; d..., estimate, converged, estimator_name, smoothed_observation)
     end
 end
-

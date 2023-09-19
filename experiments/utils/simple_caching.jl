@@ -1,5 +1,5 @@
 # Note: This code assumes the presence of a global variable `project_root_dir`.
-import BSON
+using BSON: BSON
 
 function clear_cache!()
     empty!(results_cache)
@@ -9,9 +9,13 @@ function unload_cache!()
     global results_cache = nothing
 end
 
-function save_cache!(result_group)
+function save_cache!(result_group; force = false)
     save_path = joinpath(project_root_dir, "data/$result_group/cache.bson")
-    @assert !isfile(save_path)
+    if !force
+        !isfile(save_path) ||
+            error("$save_path already exists. If you want to overwrite this file, call with kwarg \
+                  `force = true`.")
+    end
     BSON.bson(save_path, results_cache)
 end
 
@@ -30,7 +34,7 @@ macro run_cached(assigned_computation_expr)
 
     quote
         $(esc(var)) = run_cached!(result_group, $(Meta.quot(var))) do
-            $fun
+            $(esc(fun))
         end
     end
 end
@@ -44,7 +48,7 @@ function run_cached!(f, result_group, key; force_run = false)
 end
 
 function load_cache_if_not_defined!(the_result_group; filly_emtpy = true)
-    global results_cache = if !isdefined(Main, :results_cache) || isnothing(results_cache)
+    global results_cache = if !isdefined(@__MODULE__, :results_cache) || isnothing(results_cache)
         loaded_cache = load_cache(the_result_group)
         if isnothing(loaded_cache)
             @info "No persisted results cache file found. Resuming with an empty cache."
@@ -53,11 +57,11 @@ function load_cache_if_not_defined!(the_result_group; filly_emtpy = true)
             @info "Loaded cached results for group \"$the_result_group\" from file!"
             loaded_cache
         end
-    elseif isdefined(Main, :results_cache) &&
+    elseif isdefined(@__MODULE__, :results_cache) &&
            any(!startswith(string(k), "$the_result_group.") for k in keys(results_cache))
-        error("Skipping. Cache contains results for another group. In order to proceed, call
-              `unload_cache()`. If you want to keep the cached results, make sure to call
-              `save_cache!()` first.")
+        error("Skipping. Cache contains results for another group. In order to proceed, call \
+              `unload_cache!()`. If you want to keep the cached results, make sure to call \
+              `save_cache!(result_group)` first.")
     elseif results_cache isa Dict
         @info "Cache for group \"$the_result_group\" present. No additional cache loaded."
         results_cache

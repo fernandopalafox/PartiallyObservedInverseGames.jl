@@ -1,62 +1,59 @@
-# PartiallyObservedInverseGames.jl
+# SlackHyperplanes.jl
 
-![build](https://github.com/PRBonn/PartiallyObservedInverseGames.jl/workflows/build/badge.svg)
-[![codecov](https://codecov.io/gh/PRBonn/PartiallyObservedInverseGames.jl/branch/master/graph/badge.svg?token=AUd9TmzfI2)](https://codecov.io/gh/PRBonn/PartiallyObservedInverseGames.jl)
+Collision-free trajectories for non-cooperative multi-agent systems using inferred rotating hyperplane inequality constraints. 
 
-An inverse game solver for inferring objectives from noise-corrupted partial
-state observations of non-cooperative multi-agent interactions.
+An example using the Hill-Clohessy-Wiltshire equations for relative orbital motion:
+<table>
+  <tr>
+    <td style="height: 10px;">1. Noisy expert data</td>
+    <td style="height: 10px;">2. Inferred hyperplanes</td>
+    <td style="height: 10px;">3. Collision-free trajectory</td>
+  </tr>
+  <tr>
+    <td valign="top"><img src="media/pull_expert.gif"  height="250"></td>
+    <td valign="top"><img src="media/pull_inverse.gif" height="250"></td>
+    <td valign="top"><img src="media/pull_3D.gif"      height="250"></td>
+  </tr>
+ </table>
 
-## Paper
+> Note: this is a work in progress. For more details on how to use it please reach out to me at [fernandopalafox@utexas.edu](mailto:fernandopalafox@utexa.edu) or open an issue.
 
-[![](media/teaser.png)](https://arxiv.org/abs/2106.03611)
+## Approach 
 
-```latex
-@inproceedings{peters2021rss,
-    title     = {Inferring Objectives in Continuous Dynamic Games from Noise-Corrupted Partial State Observations},
-    author    = {Peters, Lasse and Fridovich-Keil, David and Rubies-Royo, Vicen\c{c} and Tomlin, Claire J. and Stachniss, Cyrill},
-    booktitle = {Proc.~of Robotics: Science and Systems (RSS)},
-    year      = {2021},
-    codeurl   = {https://github.com/PRBonn/PartiallyObservedInverseGames.jl},
-    videourl  = {https://www.youtube.com/watch?v=BogCsYQX9Pc},
-    url       = {https://arxiv.org/abs/2106.03611}
-}
-```
+We propose a game-theoretic method for collision avoidance based on rotating
+hyperplane constraints. It is challenging to select hyperplane parameters (rotation rate, keep-out zone (KoZ) radius, and initial orientation) without introducing infeasibilities into the game. Therefore, we infer the parameters from expert data by solving for the parameters for which the resulting equilibrium trajectories best match the observed data.
+
+There are two steps to our approach:
+1. Infer the hyperplanes from the expert trajectories using an inverse game solver.
+2. Use the inferred hyperplanes to generate collision-free trajectories for previously unseen scenarios.
+
+### Rotating Hyperplanes
+
+Rotating hyperplanes are essentially half-plane constraints that rotate over time. They are defined by a normal vector $\mathbf{n}$, a rotation rate $\omega$, and a KoZ radius $\rho$. The normal vector is centered at an "obstacle" player $j$ and is rotated by $\omega$ at each time step, and the hyperplane is defined by the normal vector and the KoZ radius. An ego robot $i$ avoids collisions with $j$ by staying on the same side of the hyperplane as $j$.
+
+<img src="media/koz_diagram.jpg" width="250"/>
+
+### 1. Inverse Game Solver
+Using collision-free expert data, we infer hyperplane parameters $\theta$ by minimizing the difference between the observed trajectories, and the equilibrium trajectory from a game parameterized by $\theta$.
+
+To avoid dealing with inequality constraints (they introduce a mixed-integer problem in the inverse game), we replace the inequality constraints with slack variables.
+
+`experiments/noise.jl` contains the code for running the inverse game solver on expert trajectories with noise. 
+
+### 2. Collision-free Trajectories
+Once we have a set of hyperplane parameters, we can use them to generate collision-free trajectories for previously unseen initial conditions. We do this by solving for the KKT conditions of a game parameterized by $\theta$.
+
+`experiments/montecarlo_nsat_3d.jl` contains the code for running  a Monte Carlo analysis of the whole pipeline: load expert data -> infer hyperplanes -> generate trajectories.
+
 
 ## Setup
-
-This code was tested with Julia versions 1.5 and 1.6.
-
-### Basic
-
-Clone this reposistory
-```
-git clone https://github.com/PRBonn/PartiallyObservedInverseGames.jl
-```
 
 After you have cloned the repository, you can install all dependencies at the
 versions recorded in the `Manifest.toml`:
 
-1. Navigate to the installation directory, e.g. `cd ~/.julia/dev/PartiallyObservedInverseGames`
+1. Navigate to the installation directory, e.g. `cd ~/.julia/dev/PartiallyObservedInverseGames` **edit this**
 2. Start Julia in project mode: `julia --project`
 3. Hit `]` to enter package mode and run: `pkg> instantiate`
-
-Finally, you can run the unit tests via `] test` to confirm that the setup was
-successful. Now you are ready to use the package. See [Directory
-Layout](#directory-layout) for further details.
-
-### Binary Data Version Control
-
-Beyond that, we use [DVC](https://dvc.org) for binary data version control.
-This part of the setup is only required if you want to load our results as
-binary data rather than reproducing them yourself by re-running the
-experiments. DVC can be installed as follow:
-
-1. Install [dvc](https://dvc.org/doc/install) with http support, e.g. `pip install "dvc[http]"`
-2. [Optional] Setup [git
-   hooks](https://dvc.org/doc/command-reference/install#installed-git-hooks) to
-   automate the process of checking out dvc-controlled files: `dvc install`
-
-Now you can download the binary data and figures by running `dvc pull`.
 
 ## Directory Layout
 
@@ -64,46 +61,12 @@ Now you can download the binary data and figures by running `dvc pull`.
   inverse planning. Beyond that it contains implementations of forward game
   solvers and visualization utilities.
 
-- `test/` contains unit and integration tests for the code in `src/`
+- `experiments/` contains the code for reproducing the Monte Carlo studies.
 
-- `experiments/` contains the code for reproducing the Monte Carlo study for
-  the running example (`experiments/unicycle.jl`) and the highway overtaking
-  scenario (`experiments/highway.jl`).
+## Issues
 
-- After setting up `dvc` as described above and running `dvc pull` the
-  directory `data/` contains the binary data of our results (as `.bson` file)
-  as well as their visualization (as `.pdf` file).
+- Replacing the inequality constraints with slack variables is not ideal since it is hard to keep the slacks positive when solving the forward game. Therefore, I've archived this approach in favor of framing the inverse game as a differentiable mixed-complementarity program, and using a gradient-based method to solve for the hyperplane parameters.
 
-## Reproducing Results
+## Acknowledgements
 
-The results of the Monte Carlo study can be reproduced by running the
-corresponding scripts in `experiments/`:
-
-- 2-Player running example of collision avoidance: `experiments/unicycle.jl`
-- 5-Player highway overtaking scenario: `experiments/highway.jl`
-
-### Caching
-
-The scripts located in `experiments/` will check for cached results in `data/`.
-If cached results are found, they will be loaded and the figures will be
-reproduced from this data. In order to reproduce results from scratch you will
-have to clear the cache first by calling `clear_cache!()` (implemented in
-`experiments/utils/simple_caching.jl`). Alternatively, you can remove the
-`@run_cached`  macro in front the function calls in the experiment to disable
-caching for that call.
-
-### Distributed Experiments
-
-Running a large scale Monte Carlo study can take a substantial amount of time.
-Thus, this package uses
-[`Distributed.jl`](https://docs.julialang.org/en/v1/stdlib/Distributed/) for
-parallelization. If there are multiple workers registered in the worker pool,
-the experiment scripts will automatically parallelize since all
-heavy lifting is implemented using
-[`Distributed.pmap`](https://docs.julialang.org/en/v1/stdlib/Distributed/#Distributed.pmap).
-Workers can run on the same machine, on a remote cluster, or even both. The
-only requirement is that all code can be loaded on the remote worker. This can
-be achieved by mounting the repository to a shared directory that is available
-from all nodes in the (potentially heterogeneous) cluster or by utilizing
-`rsync`. A suit of useful utility functions for this task can also be found in
-[Distributor.jl](https://github.com/lassepe/Distributor.jl).
+Built from a fork of [PartiallyObservedInverseGames](https://github.com/PRBonn/PartiallyObservedInverseGames.jl)

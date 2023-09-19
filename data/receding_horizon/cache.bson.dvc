@@ -1,0 +1,4 @@
+outs:
+- md5: 85737c36843d1be984775e8b0081a396
+  size: 421946
+  path: cache.bson

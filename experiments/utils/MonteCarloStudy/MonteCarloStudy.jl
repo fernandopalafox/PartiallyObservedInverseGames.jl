@@ -1,24 +1,30 @@
 module MonteCarloStudy
 
-import Distributed
+using Distributed: Distributed
 using Distributed: pmap
 
 import PartiallyObservedInverseGames.InversePreSolve
 using PartiallyObservedInverseGames.ForwardGame: solve_game
 using PartiallyObservedInverseGames.InverseGames:
-    InverseKKTConstraintSolver, InverseKKTResidualSolver, solve_inverse_game
+    InverseKKTConstraintSolver,
+    InverseKKTResidualSolver,
+    AugmentedInverseKKTResidualSolver,
+    solve_inverse_game
 
-import Random
-import Statistics
-import LinearAlgebra
-import Distances
-import VegaLite
+using Random: Random
+using Statistics: Statistics
+using LinearAlgebra: LinearAlgebra
+using Distances: Distances
+using VegaLite: VegaLite
 
 import PartiallyObservedInverseGames.CostUtils
 import PartiallyObservedInverseGames.DynamicsModelInterface
-using PartiallyObservedInverseGames.TrajectoryVisualization: visualize_trajectory, visualize_trajectory_batch
+using PartiallyObservedInverseGames.TrajectoryVisualization:
+    visualize_trajectory, visualize_trajectory_batch
 using ProgressMeter: @showprogress
 using VegaLite: @vlplot
+using Setfield: @set
+using JuMP: JuMP
 
 #======================================== Generate Dataset =========================================#
 
