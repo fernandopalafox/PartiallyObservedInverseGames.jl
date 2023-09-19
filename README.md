@@ -1,9 +1,8 @@
 # SlackHyperplanes.jl
 
-An inverse game solver for inferring rotating hyperplanes from noise-corrupted observations of non-cooperative multi-agent interactions.
+Collision-free trajectories for non-cooperative multi-agent systems using inferred rotating hyperplane inequality constraints. 
 
-The inferred hyperplanes can then be used for collision-free trajectories in previously unseen scenarios. 
-
+An example using the Hill-Clohessy-Wiltshire equations for relative orbital motion:
 <table>
   <tr>
     <td style="height: 10px;">1. Noisy expert data</td>
@@ -17,12 +16,12 @@ The inferred hyperplanes can then be used for collision-free trajectories in pre
   </tr>
  </table>
 
-Built from a fork of [PartiallyObservedInverseGames](https://github.com/PRBonn/PartiallyObservedInverseGames.jl)
+> Note: this is a work in progress. For more details on how to use it please reach out to me at [fernandopalafox@utexas.edu](mailto:fernandopalafox@utexa.edu) or open an issue.
 
 ## Approach 
 
 We propose a game-theoretic method for collision avoidance based on rotating
-hyperplane constraints. It is challenging to select hyperplane parameters (rotation rate, keep-out zone (KoZ) radius, and initial orientation) without introducing infeasibilities into the game. Therefore, we propose to infer the parameters from expert data by solving for the parameters for which the resulting equilibrium trajectories best match the observed data.
+hyperplane constraints. It is challenging to select hyperplane parameters (rotation rate, keep-out zone (KoZ) radius, and initial orientation) without introducing infeasibilities into the game. Therefore, we infer the parameters from expert data by solving for the parameters for which the resulting equilibrium trajectories best match the observed data.
 
 There are two steps to our approach:
 1. Infer the hyperplanes from the expert trajectories using an inverse game solver.
@@ -40,14 +39,13 @@ Using collision-free expert data, we infer hyperplane parameters $\theta$ by min
 
 To avoid dealing with inequality constraints (they introduce a mixed-integer problem in the inverse game), we replace the inequality constraints with slack variables.
 
-**include math for inverse game**
-
 `experiments/noise.jl` contains the code for running the inverse game solver on expert trajectories with noise. 
 
 ### 2. Collision-free Trajectories
 Once we have a set of hyperplane parameters, we can use them to generate collision-free trajectories for previously unseen initial conditions. We do this by solving for the KKT conditions of a game parameterized by $\theta$.
 
 `experiments/montecarlo_nsat_3d.jl` contains the code for running  a Monte Carlo analysis of the whole pipeline: load expert data -> infer hyperplanes -> generate trajectories.
+
 
 ## Setup
 
@@ -67,3 +65,9 @@ versions recorded in the `Manifest.toml`:
 - `experiments/` contains the code for reproducing the Monte Carlo studies.
 
 ## Issues
+
+- Replacing the inequality constraints with slack variables is not ideal since it is hard to keep the slacks positive when solving the forward game. Therefore, I've archived this approach in favor of framing the inverse game as a differentiable mixed-complementarity program, and using a gradient-based method to solve for the hyperplane parameters.
+
+## Acknowledgements
+
+Built from a fork of [PartiallyObservedInverseGames](https://github.com/PRBonn/PartiallyObservedInverseGames.jl)
