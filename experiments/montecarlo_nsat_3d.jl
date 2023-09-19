@@ -50,7 +50,7 @@ function setup_forward_hyperplanes(;rng = MersenneTwister(0))
 
     # Cost settings 
     weights = repeat([10.0 0.0001], outer = n_players) # from forward game 
-    os_init = pi/2 # init. angle offset
+    os_init = pi/4 # init. angle offset
     as = [-pi/2 + os_init*(i - 1) for i in 1:n_players] # angles
     T = size(data_states, 2)
     T_activate_goalcost = T
@@ -68,9 +68,12 @@ function setup_forward_hyperplanes(;rng = MersenneTwister(0))
     end
 
     # Inverse game parameters
-    μs = [100.0, 50.0, 10.0, 1.0, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05]
-    parameter_bounds = (; ω = (-1.0, 0.0), α = (0.0, 0.0), ρ = (10.0, scale/2.0))
-    regularization_weights = (; ρ = 0.01)
+    μs = [1000.0, 500.0, 250.0, 100.0, 50.0, 10.0, 5.0, 1.0, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.001, 0.0001]
+    μs = [500.0, 400.0, 300.0, 200.0, 100.0, 50.0, 10.0, 5.0, 1.0, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05, 0.001, 0.0001]
+    μs = [500.0]
+    # μs = [1000.0]
+    parameter_bounds = (; ω = (-0.03, 0.0), α = (0,0), ρ = (10.0, scale/2.0))
+    regularization_weights = (; α = 0.001, ρ = 0.001)
     adjacency_matrix = zeros(Bool, n_players, n_players)
     for i in 1:n_players
         for j in 1:n_players
@@ -91,10 +94,10 @@ function setup_forward_hyperplanes(;rng = MersenneTwister(0))
     mc_control_system = TestDynamics.ProductSystem([TestDynamics.Satellite3D(ΔT, n, m, u_max) for _ in 1:n_players])
     mc_T = Int(1.0*T)
     mc_T_activate_goalcost = mc_T
-    # mc_μs = [10000.0, 1000.0, 500.0, 10.0, 5.0, 1.0]
-    # mc_μs = [1000.0, 1000.0, 500.0, 10.0, 5.0, 1.0]
-    mc_μs = [1000.0]
+    mc_μs = [500.0, 100.0, 10.0, 5.0, 1.0]
+    mc_μs = [500.0]
     mc_max_wall_time = 5.0
+    scale_z = 1.0
 
     (;
         n_players,
@@ -122,6 +125,7 @@ function setup_forward_hyperplanes(;rng = MersenneTwister(0))
         mc_T_activate_goalcost,
         mc_μs,
         mc_max_wall_time,
+        scale_z
     )
 end
 
@@ -163,7 +167,14 @@ function inverse(game_setup)
         adjacency_matrix;
         control_system,
         player_cost_models,
-        init = (;s_hyperplanes = 1.5*scale, x = observation.x, u = observation.u, λ_dynamics = solution_kkt.λ),
+        init = (;
+            s_hyperplanes = 1.5 * scale,
+            x = observation.x,
+            u = observation.u,
+            λ_dynamics = solution_kkt.λ,
+            s_thrust_limits = 1.0,
+            λ_thrust_limits = μs[1],
+        ),
         solver = Ipopt.Optimizer,
         solver_attributes = (; max_wall_time, print_level = 5),
         μ = μs[1],
@@ -229,7 +240,7 @@ function inverse(game_setup)
     visualize_rotating_hyperplanes(
             observation.x,
             (;
-                ΔT = 0.1,
+                ΔT,
                 adjacency_matrix = zeros(Bool, n_players, n_players),
                 # adjacency_matrix = adjacency_matrix,
                 ωs = constraint_parameters.ωs,
@@ -239,16 +250,20 @@ function inverse(game_setup)
                 n_states_per_player,
                 goals = [player_cost_models[i].goal_position for i in 1:n_players],
             );
-            title = "expert",
+            filename = "expert_pull",
             koz = true,
             fps = 10.0,
+            noisy = true,
+            save_frame = 25,
         )
     visualize_rotating_hyperplanes(
         solution_inverse.x,
         plot_parameters;
-        title = string(n_players)*"p",
+        # title = string(n_players)*"p",
         koz = true,
         fps = 10.0,
+        filename = "inverse_pull",
+        save_frame = 25,
     )
 
     solution_inverse
@@ -275,7 +290,8 @@ function mc(trials, solution_inverse, game_setup; visualize = false)
     mc_T,
     mc_T_activate_goalcost,
     mc_μs,
-    mc_max_wall_time = game_setup
+    mc_max_wall_time,
+    scale_z = game_setup
 
     n_states_per_player = mc_n_states_per_player
     control_system = mc_control_system
@@ -298,7 +314,7 @@ function mc(trials, solution_inverse, game_setup; visualize = false)
         
         # Generate initial position and velocity for each player
         as = rand(rng, n_players) .* 2*pi
-        zs_0 = rand(rng, n_players) .* 2*scale .- scale
+        zs_0 = (rand(rng, n_players) .* 2*scale .- scale)*scale_z
         x0 = vcat(
         [
             vcat(-scale*unitvector(a), zs_0[idx], [v_init*cos(a), v_init*sin(a), 0]) for
@@ -308,7 +324,7 @@ function mc(trials, solution_inverse, game_setup; visualize = false)
 
         # Setup sampled costs and control system 
         as_goals = as
-        zs_goals = rand(rng, n_players) .* 2*scale .- scale # random goal for each player
+        zs_goals = (rand(rng, n_players) .* 2*scale .- scale)*scale_z # random goal for each player
 
         # Costs
         player_cost_models = map(enumerate(as_goals)) do (ii, a)
@@ -478,7 +494,7 @@ function mc(trials, solution_inverse, game_setup; visualize = false)
 
         # Plot segments
         if !converged_forward 
-            plt = plot(title = "Trial $trial_counter, Converged = $converged_forward",
+            plt = Plots.plot(title = "Trial $trial_counter, Converged = $converged_forward",
                         xlabel = "x",
                         ylabel = "y",
                         aspect_ratio = :equal,
@@ -490,7 +506,7 @@ function mc(trials, solution_inverse, game_setup; visualize = false)
                     if i != j
                         
                         # Line segment 
-                        plot!(
+                        Plots.plot!(
                             plt,
                             [x0[1 + (i - 1)*n_states_per_player], player_cost_models[i].goal_position[1]],
                             [x0[2 + (i - 1)*n_states_per_player], player_cost_models[i].goal_position[2]],
@@ -499,18 +515,18 @@ function mc(trials, solution_inverse, game_setup; visualize = false)
                             )
 
                         # Player position  
-                        scatter!(
+                        Plots.scatter!(
                             plt,
                             [x0[1 + (i - 1)*n_states_per_player]],
                             [x0[2 + (i - 1)*n_states_per_player]],
                             color = colors[i],
                             marker = :circle,
                             )
-                        annotate!([x0[1 + (i - 1)*n_states_per_player] + 0.2*mc_scale],
+                        Plots.annotate!([x0[1 + (i - 1)*n_states_per_player] + 0.2*mc_scale],
                                 [x0[2 + (i - 1)*n_states_per_player]],"$i")
 
                         # goal position
-                        scatter!(
+                        Plots.scatter!(
                             plt,
                             [player_cost_models[i].goal_position[1]],
                             [player_cost_models[i].goal_position[2]],

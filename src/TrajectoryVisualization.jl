@@ -172,7 +172,16 @@ function visualize_rotating_hyperplane(states, parameters)
     gif(anim, fps = 5, "rotating_hyperplane_"*parameters.title*".gif")
 end    
 
-function visualize_rotating_hyperplanes(states, parameters; title = "", koz = true, fps = 5) 
+function visualize_rotating_hyperplanes(states, parameters; title = "", filename = "", koz = true, fps = 5, save_frame = nothing, noisy = false)
+
+    # Parameters 
+    text_size = 20
+    text_size_ticks = 15
+    marker_size_goals = 10
+    marker_size_players = 7.5
+    marker_observations = 4.0
+    line_width = 4
+    line_width_hyperplanes = 3
 
     # Useful stuff
     position_indices = vcat(
@@ -219,22 +228,35 @@ function visualize_rotating_hyperplanes(states, parameters; title = "", koz = tr
     # Animation of trajectory 
     anim = @animate for i = 1:T
         # Plot trajectories
-        Plots.plot(; legend = false, title = title, xlabel = "x", ylabel = "y", size = (500, 500))
-        Plots.plot!(
-            [states[position_indices[player, 1], 1:i] for player in 1:(parameters.n_players)],
-            [states[position_indices[player, 2], 1:i] for player in 1:(parameters.n_players)]
+        Plots.plot(;
+            legend = false,
+            title = title,
+            xlabel = "x position [m]",
+            ylabel = "y position [m]",
+            yrotation = 90,
+            size = (500, 500),
+            guidefontsize = text_size,
+            tickfontsize = text_size_ticks,
+            linewidth = line_width,
         )
-        Plots.scatter!(
-            [states[position_indices[player, 1], i] for player in 1:(parameters.n_players)],
-            [states[position_indices[player, 2], i] for player in 1:(parameters.n_players)],
-            markersize = 5,
-            color = colors,
-        )
+        if noisy
+            Plots.scatter!(
+                [states[position_indices[player, 1], 1:i] for player in 1:(parameters.n_players)],
+                [states[position_indices[player, 2], 1:i] for player in 1:(parameters.n_players)],
+                markersize = marker_observations,
+            )
+        else
+            Plots.plot!(
+                [states[position_indices[player, 1], 1:i] for player in 1:(parameters.n_players)],
+                [states[position_indices[player, 2], 1:i] for player in 1:(parameters.n_players)],
+                linewidth = line_width,
+            )
+        end
         # plot goals from parameters info with an x
         Plots.scatter!(
             [parameters.goals[player][1] for player in 1:(parameters.n_players)],
             [parameters.goals[player][2] for player in 1:(parameters.n_players)],
-            markersize = 5,
+            markersize = marker_size_goals,
             marker = :star4,
             color = colors,
         )
@@ -248,34 +270,51 @@ function visualize_rotating_hyperplanes(states, parameters; title = "", koz = tr
                     [states[position_indices[couple[2], 2], i] + parameters.ρs[couple_idx] * sin(θ) for θ in range(0,stop=2π,length=100)], 
                     color = colors[couple[1]], 
                     legend = false,
-                    fillalpha = 0.1,
+                    fillalpha = 0.25,
                     fill = true,
+                    # linewidth = line_width_hyperplanes,
+                    linewidth = 0.0,
                 )
             end
             # Plot hyperplane normal
             ni =
                 parameters.ρs[couple_idx] *
                 n(i, θs[couple_idx], parameters.αs[couple_idx], parameters.ωs[couple_idx])
-            Plots.plot!(
-                [states[position_indices[couple[2], 1], i], states[position_indices[couple[2], 1], i] + ni[1]],
-                [states[position_indices[couple[2], 2], i], states[position_indices[couple[2], 2], i] + ni[2]],
-                arrow = true,
-                color = colors[couple[1]],
-            )
+            # Plots.plot!(
+            #     [states[position_indices[couple[2], 1], i], states[position_indices[couple[2], 1], i] + ni[1]],
+            #     [states[position_indices[couple[2], 2], i], states[position_indices[couple[2], 2], i] + ni[2]],
+            #     arrow = true,
+            #     color = colors[couple[1]],
+            # )
             # Plot hyperplane 
             hyperplane_domain = 10*range(domain[1],domain[2],100)
             p = states[position_indices[couple[2], 1:2], i] + ni
             Plots.plot!(hyperplane_domain .+ p[1],
                 [-ni[1]/ni[2]*x + p[2] for x in hyperplane_domain],
                 color = colors[couple[1]],
+                linewidth = line_width_hyperplanes,
+                linestyle = :dot,
             )
         end
+
+        # Plot player positions on top 
+        Plots.scatter!(
+            [states[position_indices[player, 1], i] for player in 1:(parameters.n_players)],
+            [states[position_indices[player, 2], i] for player in 1:(parameters.n_players)],
+            markersize = marker_size_players,
+            color = colors,
+        )
 
         # Set domain
         Plots.plot!(xlims = domain,
               ylims = domain)
+
+        # Save if at saveframe
+        if !isnothing(save_frame) && i == save_frame
+            Plots.savefig("figures/rotating_hyperplanes_frame_"*filename*".png")
+        end
     end
-    gif(anim, fps = fps, "rotating_hyperplanes_"*title*".gif")
+    gif(anim, fps = fps, "rotating_hyperplanes_"*filename*".gif")
 end    
 
 function visualize_obs_pred(states, T_obs, parameters; koz = true, fps = 5) 
@@ -620,6 +659,15 @@ end
 
 function display_3D_trajectory(states, parameters; title = "title", filename = "3D_trajectory.gif", hyperplane = false)
 
+    # Parameters 
+    text_size = 20
+    text_size_ticks = 15
+    marker_size_goals = 10
+    marker_size_players = 7.5
+    marker_observations = 4.0
+    line_width = 4
+    line_width_hyperplanes = 3
+
     position_indices = vcat(
         [[1 2 3] .+ (player - 1) * parameters.n_states_per_player for player in 1:(parameters.n_players)]...,
     )
@@ -751,15 +799,22 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
     end
     
     set_theme!(theme_light())
+    set_theme!()
     fig = Figure(); display(fig)
     ax = Axis3(
         fig[1, 1],
         aspect = :equal,
         limits = (xy_domain, xy_domain, z_domain),
         viewmode = :fit,
-        title = title,
-        xypanelvisible = false,
-        perspectiveness = 0.5
+        # title = title,
+        # xypanelvisible = false,
+        perspectiveness = 0.5,
+        xlabel = "x position [m]",
+        ylabel = "y position [m]",
+        zlabel = "z position [m]",
+        xlabelsize = text_size,
+        ylabelsize = text_size,
+        zlabelsize = text_size,
     )
     # hidedecorations!(ax; top = false)
     hidespines!(ax)
@@ -771,19 +826,18 @@ function display_3D_trajectory(states, parameters; title = "title", filename = "
             ax,
             player_points[player];
             color = colors[player],
-            markersize = 15,
-            marker = :utriangle
+            markersize = 20,
         )
 
         # Player track
         track_color = [Makie.RGBA(colors[player],(i/tail)^2) for i in 1:length(player_tracks[player][])]
-        lines!(ax, player_tracks[player]; linewidth = 2, color = track_color, transparency = true)
+        lines!(ax, player_tracks[player]; linewidth = 4, color = track_color, transparency = true)
 
         # Player goals 
         Makie.scatter!(
             ax,
             Point3f(parameters.goals[player]);
-            markersize = 15,
+            markersize = 20,
             marker = :star4,
             color = colors[player],
         )

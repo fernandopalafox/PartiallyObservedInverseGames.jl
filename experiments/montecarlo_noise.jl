@@ -25,7 +25,7 @@ using GLMakie
 
 include("../experiments/utils/misc.jl")
 
-"Setup game, solver, and Monte Carlo analysis"
+"Setup game, solver, and Monte Carlo analysis. Edit this first."
 function setup()
     # ---- Parameters ---- 
     
@@ -38,11 +38,12 @@ function setup()
     v_init = 0.0
     os_v = deg2rad(0) # init. angle offset
     os_init = pi/2 # init. angle offset
-    as = [0.0, pi/2]
+    # as = [0.0, pi/2]
+    as = [-pi/2 + os_init*(i - 1) for i in 1:n_players] # angles
 
     # Dynamics 
     ΔT = 5.0
-    t_real = 210.0
+    t_real = 220.0
     m   = 100.0 # kg
     r₀ = (400 + 6378.137) # km
     grav_param  = 398600.4418 # km^3/s^2
@@ -51,24 +52,37 @@ function setup()
     control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m, u_max) for _ in 1:n_players])
     
     # Hyperplane 
-    adjacency_matrix = [false true;
-                        false false]
-    ωs = 0.01
+    adjacency_matrix = zeros(Bool, n_players, n_players)
+    for i in 1:n_players
+        for j in 1:n_players
+            if i < j
+                adjacency_matrix[i, j] = true
+            end
+        end
+    end
+    ωs = -0.02
     αs = 0.0
-    ρs = 25.0
+    ρs = 30.0
 
     # Costs function 
     t_real_activate_goalcost = t_real
     weights = repeat([10.0 0.0001], outer = n_players) # from forward game 
     
     # Inverse Solver  
-    μs = [1000.0, 100.0, 50.0, 10.0, 1.0, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05]
-    parameter_bounds = (; ω = (0.0, 0.1), α = (0.0, 0.0), ρ = (10.0, scale/2.0))
-    regularization_weights = (; ρ = 0.01)
-    max_wall_time = 15.0
+    μs = [100.0, 50.0, 1.0, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01, 0.001]
+    parameter_bounds = (; ω = (-0.5, 0.0), α = (0.0, 0.0), ρ = (10.0, scale/2))
+    regularization_weights = (; ρ = 0.001)
+    max_wall_time = 5.0
+    save_frame = 28
+
+    # Monte Carlo settings 
+    mc_μs = [100.0, 75.0, 50.0, 25.0, 10.0, 7.50, 5.0, 2.5, 1.0, 0.5, 0.4, 0.3, 0.2, 0.1]
+    mc_μs = [100.0, 90.0, 75.0, 50.0, 25.0, 10.0, 7.50, 5.0, 2.5, 1.0]
+    mc_μs = [500.0, 100.0, 90.0, 75.0, 50.0, 25.0, 10.0, 7.50, 5.0, 2.5, 1.0]
+    mc_max_wall_time = 60.0
 
     # Noise 
-    rng = MersenneTwister(0)
+    rng = MersenneTwister(2)
 
     # ---- Setup system and costs ----
     T = Int(t_real / ΔT)
@@ -113,11 +127,14 @@ function setup()
         player_cost_models,
         x0, 
         parameter_bounds,
-        regularization_weights
+        regularization_weights, 
+        mc_μs,
+        mc_max_wall_time,
+        save_frame,
     )
 end
 
-"Run forward game"
+"Generate a forward game solution. Plug this into mc() to run Monte Carlo analysis."
 function forward(game_setup)
 
     # Unpack 
@@ -257,7 +274,7 @@ function forward(game_setup)
                 n_states_per_player,
                 goals = [player_cost_models[i].goal_position for i in 1:n_players],
             );
-            title = "forward_kkt",
+            filename = "forward_kkt",
             koz = true,
             fps = 10.0,
         )
@@ -273,10 +290,13 @@ function forward(game_setup)
                 n_states_per_player,
                 goals = [player_cost_models[i].goal_position for i in 1:n_players],
             );
-            title = "forward_hyp",
+            filename = "forward_hyp",
             koz = true,
             fps = 10.0,
         )
+
+    # Maximum control effort in solution
+    println("Maximum control effort in solution: ", maximum(abs.(solution_forward.u)))
 
     return solution_forward
 
@@ -298,14 +318,18 @@ function inverse(observation, game_setup)
     t_real_activate_goalcost,
     T,
     weights,
-    μs,
-    max_wall_time,
+    x0,
     rng,
     control_system,
     player_cost_models,
-    x0,
     parameter_bounds,
-    regularization_weights = game_setup
+    regularization_weights,
+    mc_μs,
+    mc_max_wall_time, 
+    save_frame = game_setup
+
+    μs = mc_μs
+    max_wall_time = mc_max_wall_time
 
     # ---- Inverse w/ noise ----
 
@@ -327,30 +351,37 @@ function inverse(observation, game_setup)
         adjacency_matrix;
         control_system,
         player_cost_models,
-        init = (;s_hyperplanes = 1.5*scale, x = observation.x, u = observation.u, λ_dynamics = solution_kkt.λ),
+        init = (;
+            s_hyperplanes = 1.5 * scale,
+            x = solution_kkt.x,
+            u = solution_kkt.u,
+            λ_dynamics = solution_kkt.λ,
+            s_thrust_limits = 1.0,
+            λ_thrust_limits = μs[1],
+        ),
         solver = Ipopt.Optimizer,
         solver_attributes = (; max_wall_time, print_level = 5),
         μ = μs[1],
         parameter_bounds, 
         regularization_weights,
     )
+    
     if !converged_inverse
         println("       Inverse game did not converge at μ[1] = ", μs[1])
  
         # ---- Animation of trajectories ----
-        constraint_parameters = (;adjacency_matrix, ωs = ωs, αs = αs, ρs = ρs) 
         # Forward noisy
         visualize_rotating_hyperplanes(
                 observation.x,
                 (;
-                    ΔT = 0.1,
-                    # adjacency_matrix = zeros(Bool, n_players, n_players),
-                    adjacency_matrix = adjacency_matrix,
-                    ωs = constraint_parameters.ωs,
-                    αs = constraint_parameters.αs,
-                    ρs = constraint_parameters.ρs,
-                    n_players = 2,
-                    n_states_per_player = 4,
+                    ΔT,
+                    adjacency_matrix = zeros(Bool, n_players, n_players),
+                    # adjacency_matrix,
+                    ωs,
+                    αs,
+                    ρs,
+                    n_players,
+                    n_states_per_player,
                     goals = [player_cost_models[i].goal_position for i in 1:n_players],
                 );
                 title = "forward_noisy",
@@ -361,13 +392,13 @@ function inverse(observation, game_setup)
         visualize_rotating_hyperplanes(
                 solution_inverse.x,
                 (;
-                    ΔT = 0.1,
-                    adjacency_matrix = adjacency_matrix,
+                    ΔT,
+                    adjacency_matrix,
                     ωs = solution_inverse.ωs,
                     αs = solution_inverse.αs,
                     ρs = solution_inverse.ρs,
-                    n_players = 2,
-                    n_states_per_player = 4,
+                    n_players,
+                    n_states_per_player,
                     goals = [player_cost_models[i].goal_position for i in 1:n_players],
                 );
                 title = "inferred",
@@ -389,6 +420,7 @@ function inverse(observation, game_setup)
         # )
     end
 
+    # Annealing
     converged_new = converged_inverse
     solution_new = solution_inverse
     model_new = model_inverse
@@ -402,31 +434,32 @@ function inverse(observation, game_setup)
             init = (;model = model_new, solution_new...),
             solver = Ipopt.Optimizer,
             solver_attributes = (; max_wall_time, print_level = 1),
-            ρmin,
             μ,
+            parameter_bounds, 
+            regularization_weights,
         )
 
         if !converged_inverse
             println("       Inverse game did not converge at μ = ", μ)
-            return converged_new, solution_new
+            solution_inverse = solution_new
+            model_inverse = model_new
+            converged_inverse = converged_new
+            break
         else
-            # println(
-            #     "   Converged at μ = ",
-            #     μ,
-            #     " ω ",
-            #     solution_inverse.ωs[1],
-            #     " α ",
-            #     solution_inverse.αs[1],
-            #     " ρ ",
-            #     solution_inverse.ρs[1],
-            # )
+            println(
+                "   Converged at μ = ",
+                μ,
+                " ω ",
+                solution_inverse.ωs,
+                " α ",
+                solution_inverse.αs,
+                " ρ ",
+                solution_inverse.ρs,
+            )
             solution_new = solution_inverse
             model_new = model_inverse
         end
     end
-    # converged_inverse = converged_new
-    # solution_inverse = solution_new
-    # model_inverse = model_new
 
     # @assert minimum(solution_inverse.s.data) ≥ 0 "Negative slacks"
 
@@ -443,60 +476,60 @@ function inverse(observation, game_setup)
     #     )
     # end
 
-    # # ---- Animation of trajectories ----
-    # constraint_parameters = (;adjacency_matrix, ωs = ωs, αs = αs, ρs = ρs) 
-    # # Forward noisy
-    # visualize_rotating_hyperplanes(
-    #         observation.x,
-    #         (;
-    #             ΔT = 0.1,
-    #             # adjacency_matrix = zeros(Bool, n_players, n_players),
-    #             adjacency_matrix = adjacency_matrix,
-    #             ωs = constraint_parameters.ωs,
-    #             αs = constraint_parameters.αs,
-    #             ρs = constraint_parameters.ρs,
-    #             n_players = 2,
-    #             n_states_per_player = 4,
-    #             goals = [player_cost_models[i].goal_position for i in 1:n_players],
-    #         );
-    #         title = "forward_noisy",
-    #         koz = true,
-    #         fps = 10.0,
-    #     )
-    # # Inverse 
-    # visualize_rotating_hyperplanes(
-    #         solution_inverse.x,
-    #         (;
-    #             ΔT = 0.1,
-    #             adjacency_matrix = adjacency_matrix,
-    #             ωs = solution_inverse.ωs,
-    #             αs = solution_inverse.αs,
-    #             ρs = solution_inverse.ρs,
-    #             n_players = 2,
-    #             n_states_per_player = 4,
-    #             goals = [player_cost_models[i].goal_position for i in 1:n_players],
-    #         );
-    #         title = "inferred",
-    #         koz = true,
-    #         fps = 10.0,
-    #     )
-
-    # Check slack 
-    if minimum(solution_inverse.s.data') < -0.1
-        converged_inverse = false
-        println("       negative slacks: ", minimum(solution_inverse.s.data'))
-    end
+    # ---- Animation of trajectories ----
+    constraint_parameters = (;adjacency_matrix, ωs = ωs, αs = αs, ρs = ρs) 
+    # Forward noisy
+    visualize_rotating_hyperplanes(
+        observation.x,
+        (;
+            ΔT,
+            adjacency_matrix = zeros(Bool, n_players, n_players),
+            # adjacency_matrix,
+            ωs,
+            αs,
+            ρs,
+            n_players,
+            n_states_per_player,
+            goals = [player_cost_models[i].goal_position for i in 1:n_players],
+        );
+        filename = "forward_noisy",
+        koz = true,
+        fps = 10.0,
+        save_frame,
+        noisy = true
+    )
+    # Inverse 
+    visualize_rotating_hyperplanes(
+            solution_inverse.x,
+            (;
+                ΔT,
+                adjacency_matrix,
+                ωs = solution_inverse.ωs,
+                αs = solution_inverse.αs,
+                ρs = solution_inverse.ρs,
+                n_players,
+                n_states_per_player,
+                goals = [player_cost_models[i].goal_position for i in 1:n_players],
+            );
+            filename = "inferred",
+            koz = true,
+            fps = 10.0,
+            save_frame
+        )
 
     return converged_inverse, solution_inverse
 end
 
-"Run Monte Carlo simulation for noise levels"
+"Run Monte Carlo simulation for a sequence of noise levels"
 function mc(trials, game_setup, solution_forward)
 
     @unpack rng = game_setup
 
     # ---- Noise levels ----
-    noise_levels = 0.0:0.1:2.5
+    # noise_levels = 0.0:0.1:2.5
+    noise_levels = 0.0:2.5:20.0
+    noise_levels = 0.0:5.0:40.0
+    noise_levels = 5.0
 
     # ---- Monte Carlo ----
     println("Starting Monte Carlo for ", length(noise_levels), " noise levels and ", trials, " trials each.")
@@ -509,11 +542,12 @@ function mc(trials, game_setup, solution_forward)
         println("Noise level: ", noise_level)
 
         for i in 1:trials
-            # Assemble noisy observation
+            # Assemble noisy observation ( TODO unknown initial conditons)
             observation = (;
-                x = solution_forward.x .+ noise_level * randn(rng, size(solution_forward.x)),
-                u = solution_forward.u .+ noise_level * randn(rng, size(solution_forward.u)),
+                x = hcat(solution_forward.x[:,1], solution_forward.x[:,2:end] .+ noise_level * randn(rng, size(solution_forward.x[:,2:end]))),
+                u = hcat(solution_forward.u[:,1], solution_forward.u[:,2:end] .+ noise_level * randn(rng, size(solution_forward.u[:,2:end]))),
             )
+
 
             # Initialize result vector with NaN
             result = ones(Float64, 1, 7) * NaN
@@ -578,9 +612,9 @@ function mc(trials, game_setup, solution_forward)
             "Convergence rate: ",
             num_converged / trials,
             " error = ",
-            sum(results[idx_converged, 6]) / trials,
+            sum(results[idx_converged, 6]) / num_converged,
             " time = ",
-            sum(results[idx_converged, 7]) / trials,
+            sum(results[idx_converged, 7]) / num_converged,
         )
     end 
 
@@ -611,28 +645,30 @@ function plotmc(results, noise_levels, game_setup)
     # Parameters
     color_iqr = :dodgerblue
     set_theme!()
+    text_size = 23
 
     # Create makie screens 
 
     # Calculation
     idx_converged = results[:,2] .== 1.0
-    trials = sum(results[:, 1] .== noise_levels[1])
+    trials = sum(results[:, 1] .== noise_levels[2])
 
     # Plot convergence rate  
-    fig_convergence = Figure()
+    fig_convergence = Figure(resolution = (800, 230), fontsize = text_size)
     ax_convergence = Axis(
         fig_convergence[1, 1],
-        xlabel = "Noise level [m]",
-        ylabel = "Convergence rate [%]",
+        xlabel = "Noise standard deviation [m]",
+        ylabel = "Convergence %",
         # title = "Convergence rate vs noise level",
-        limits = (nothing, (0, 110)),
+        limits = (nothing, (0, 100)),
+
     )
     Makie.barplot!(
         ax_convergence,
         noise_levels,
-        [sum(results[results[:, 1] .== noise_level, 2]) / trials * 100 for noise_level in noise_levels],
+        [sum(results[results[:, 1] .== noise_level, 2]) / (noise_level == noise_levels[1] ? 2.0 : trials) * 100 for noise_level in noise_levels],
     )
-    # display(fig_convergence)
+    rowsize!(fig_convergence.layout, 1, Aspect(1,0.2))
 
     # Plot bands for ω
     ω_median = [median(results[(results[:, 1] .== noise_level) .* idx_converged, 3]) for noise_level in noise_levels]
@@ -641,43 +677,43 @@ function plotmc(results, noise_levels, game_setup)
     ω_iqr = [iqr(results[(results[:, 1] .== noise_level) .* idx_converged, 3]) for noise_level in noise_levels]
     ρ_iqr = [iqr(results[(results[:, 1] .== noise_level) .* idx_converged, 5]) for noise_level in noise_levels]
 
-    fig_bands = Figure()
+    fig_bands = Figure(resolution = (800, 350), fontsize = text_size)
     ax_ω = Axis(
         fig_bands[1, 1],
-        xlabel = "Noise level [m]",
+        xlabel = "Noise standard deviation [m]",
         ylabel = "ω [rad/s]",
-        limits = ((noise_levels[1], noise_levels[end]), (0, 2*game_setup.ωs[1])),
+        limits = ((noise_levels[1], noise_levels[end]), game_setup.ωs[1] > 0 ? (0, 2*game_setup.ωs[1]) : (2*game_setup.ωs[1], 0)),
     )
     Makie.scatter!(ax_ω, noise_levels, ω_median, color = color_iqr)
     Makie.band!(ax_ω, noise_levels, ω_median .- ω_iqr/2, ω_median .+ ω_iqr/2, color = (color_iqr, 0.2))
     Makie.hlines!(ax_ω, game_setup.ωs[1], color = color_iqr, linewidth = 2, linestyle = :dot)
-
     ax_ρ = Axis(
         fig_bands[1, 2],
-        xlabel = "Noise level [m]",
+        xlabel = "Noise standard deviation [m]",
         ylabel = "ρ [m]",
-        limits = ((noise_levels[1], noise_levels[end]), (0, 2*game_setup.ρs[1])),
+        limits = ((noise_levels[1], noise_levels[end]), (0.5*game_setup.ρs[1], 1.5*game_setup.ρs[1])),
     )
     Makie.scatter!(ax_ρ, noise_levels, ρ_median, color = color_iqr)
-    Makie.band!(ax_ρ, noise_levels, clamp.(ρ_median .- ρ_iqr/2, game_setup.ρmin, Inf), ρ_median .+ ρ_iqr/2, color = (color_iqr, 0.2))
+    # Makie.band!(ax_ρ, noise_levels, clamp.(ρ_median .- ρ_iqr/2, game_setup.ρmin, Inf), ρ_median .+ ρ_iqr/2, color = (color_iqr, 0.2))
+    Makie.band!(ax_ρ, noise_levels, ρ_median .- ρ_iqr/2, ρ_median .+ ρ_iqr/2, color = (color_iqr, 0.2))
     Makie.hlines!(ax_ρ, game_setup.ρs[1], color = color_iqr, linewidth = 2, linestyle = :dot)
-    display(fig_bands)
+    rowsize!(fig_bands.layout, 1, Aspect(1,0.9))
+    
 
     # Plot reconstruction error
-    fig_error = Figure()
+    reconstruction_error_median = [median(results[(results[:, 1] .== noise_level) .* idx_converged, 6]) for noise_level in noise_levels]
+    reconstruction_error_iqr = [iqr(results[(results[:, 1] .== noise_level) .* idx_converged, 6]) for noise_level in noise_levels]
+    fig_error = Figure(resolution = (800, 250), fontsize = text_size)
     ax_error = Axis(
         fig_error[1, 1],
-        xlabel = "Noise level [m]",
+        xlabel = "Noise standard deviation [m]",
         ylabel = "Reconstruction error [m]",
         # title = "Reconstruction error vs noise level",
+        limits = ((noise_levels[1],noise_levels[end]),(0.0,nothing)),
     )
-    Makie.scatter!(
-        ax_error,
-        results[idx_converged, 1],
-        results[idx_converged, 6],
-        markersize = 15,
-    )
-    # display(fig_error)
+    Makie.scatter!(ax_error, noise_levels, reconstruction_error_median, color = color_iqr)
+    Makie.band!(ax_error, noise_levels, clamp.(reconstruction_error_median .- reconstruction_error_iqr/2, 0, Inf), reconstruction_error_median .+ reconstruction_error_iqr/2, color = (color_iqr, 0.2))
+    rowsize!(fig_error.layout, 1, Aspect(1,0.2))
 
     # # Save figures 
     save("figures/mc_noise_convergence.jpg", fig_convergence)

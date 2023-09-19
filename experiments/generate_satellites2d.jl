@@ -27,14 +27,14 @@ let
 n_players = 3
 n_states_per_player = 4
 scale = 100
-t_real = 210.0
+t_real = 220
 t_real_activate_goalcost = t_real
 
 weights = repeat([0.1 10.0 0.0001], outer = n_players) # works well enough 
 
 v_init = 0.0
 os_v = deg2rad(0) # init. angle offset
-os_init = pi/2 # init. angle offset
+os_init = pi/4 # init. angle offset
 max_wall_time = 10.0
 
 # Satellite parameters
@@ -44,9 +44,15 @@ grav_parameter  = 398600.4418 # km^3/s^2
 
 n = sqrt(grav_parameter/(r₀^3)) # rad/s
 
-u_max = 1.5
+u_max = 0.90
 
 μs = [10.0, 1.0, 0.1, 0.01, 0.001, 0.0001]
+μs = [10.0, 1.0, 0.1, 0.01, 0.001]
+μs = [10.0, 1.0]
+
+# Noise level
+noise_level = 5.0
+rng = MersenneTwister(1234)
 
 # Setup system
 control_system = TestDynamics.ProductSystem([TestDynamics.Satellite2D(ΔT, n, m, u_max) for _ in 1:n_players])
@@ -120,13 +126,21 @@ end
 solution_forward = solution_new
 model_forward = model_new
 
+# Add noise to solution
+observation = (;
+                x = hcat(solution_forward.x[:,1], solution_forward.x[:,2:end] .+ noise_level * randn(rng, size(solution_forward.x[:,2:end]))),
+                u = hcat(solution_forward.u[:,1], solution_forward.u[:,2:end] .+ noise_level * randn(rng, size(solution_forward.u[:,2:end]))),
+            )
+
 # ---- Save trajectory to file ----
-CSV.write("data/f_2d_" * string(n_players) * "p_s.csv", DataFrame(solution_forward.x, :auto), header = false)
-CSV.write("data/f_2d_" * string(n_players) * "p_c.csv", DataFrame(solution_forward.u, :auto), header = false)
+# CSV.write("data/f_2d_" * string(n_players) * "p_s.csv", DataFrame(solution_forward.x, :auto), header = false)
+# CSV.write("data/f_2d_" * string(n_players) * "p_c.csv", DataFrame(solution_forward.u, :auto), header = false)
+CSV.write("data/f_2d_" * string(n_players) * "p_s.csv", DataFrame(observation.x, :auto), header = false)
+CSV.write("data/f_2d_" * string(n_players) * "p_c.csv", DataFrame(observation.u, :auto), header = false)
 
 # ---- Animation trajectories ----
 animate_trajectory(
-    solution_forward.x, 
+    observation.x, 
         (;
             ΔT = ΔT,
             title = "fwd_game_2d_"*string(n_players)*"p", 
@@ -141,6 +155,6 @@ animate_trajectory(
 println("Maximum control effort: ", maximum(abs.(solution_forward.u)))
 
 # Plot controls
-plot(solution_forward.u', label = ["1_ux" "1_uy" "2_ux" "2_uy"], xlabel = "t", ylabel = "u", title = "Controls", ylims = (-1.1,1.1))
+Plots.plot(solution_forward.u', label = ["1_ux" "1_uy" "2_ux" "2_uy"], xlabel = "t", ylabel = "u", title = "Controls", ylims = (-1.1*u_max,1.1*u_max))
 
 end

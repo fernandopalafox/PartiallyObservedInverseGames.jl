@@ -8,30 +8,30 @@ struct Satellite3D{T<:Real}
 end
 
 function Satellite3D(ΔT, n, m, u_max)
-    # A = [ 4-3*cos(n*ΔT)      0  0           1/n*sin(n*ΔT)     2/n*(1-cos(n*ΔT))        0;
-    #       6*(sin(n*ΔT)-n*ΔT) 1  0          -2/n*(1-cos(n*ΔT)) 1/n*(4*sin(n*ΔT)-3*n*ΔT) 0;  
-    #       0                  0  cos(n*ΔT)   0                 0                        1/n*sin(n*ΔT);
-    #       3*n*sin(n*ΔT)      0  0           cos(n*ΔT)         2*sin(n*ΔT)              0;
-    #      -6*n*(1-cos(n*ΔT))  0  0          -2*sin(n*ΔT)       4*cos(n*ΔT)-3            0;
-    #       0                  0 -sin(n*ΔT)   0                 0                        cos(n*ΔT)];
-    # B = 1/m*[ 1/n^2(1-cos(n*ΔT))     2/n^2*(n*ΔT-sin(n*ΔT))       0;
-    #          -2/n^2*(n*ΔT-sin(n*ΔT)) 4/n^2*(1-cos(n*ΔT))-3/2*ΔT^2 0;
-    #           0                      0                            1/n^2(1-cos(n*ΔT));
-    #           1/n*sin(n*ΔT)          2/n*(1-cos(n*ΔT))            0;
-    #          -2/n*(1-cos(n*ΔT))      4/n*sin(n*ΔT)-3*ΔT           0;
-    #           0                      0                            1/n*sin(n*ΔT)]
-    A = [ 4-3*cos(n*ΔT)          0  0   1/n*sin(n*ΔT)     2/n*(1-cos(n*ΔT))        0;
-              6*(sin(n*ΔT)-n*ΔT) 1  0  -2/n*(1-cos(n*ΔT)) 1/n*(4*sin(n*ΔT)-3*n*ΔT) 0;  
-              0                  0  0   0                 0                        0;
-              3*n*sin(n*ΔT)      0  0           cos(n*ΔT)         2*sin(n*ΔT)      0;
-             -6*n*(1-cos(n*ΔT))  0  0          -2*sin(n*ΔT)       4*cos(n*ΔT)-3    0;
-              0                  0  0   0                 0                        0];
-    B = 1/m*[     1/n^2(1-cos(n*ΔT))         2/n^2*(n*ΔT-sin(n*ΔT))       0;
-                 -2/n^2*(n*ΔT-sin(n*ΔT)) 4/n^2*(1-cos(n*ΔT))-3/2*ΔT^2 0;
-                  0                      0                            0;
-                  1/n*sin(n*ΔT)          2/n*(1-cos(n*ΔT))            0;
-                 -2/n*(1-cos(n*ΔT))      4/n*sin(n*ΔT)-3*ΔT           0;
-                  0                      0                            0]
+    A = [ 4-3*cos(n*ΔT)      0  0           1/n*sin(n*ΔT)     2/n*(1-cos(n*ΔT))        0;
+          6*(sin(n*ΔT)-n*ΔT) 1  0          -2/n*(1-cos(n*ΔT)) 1/n*(4*sin(n*ΔT)-3*n*ΔT) 0;  
+          0                  0  cos(n*ΔT)   0                 0                        1/n*sin(n*ΔT);
+          3*n*sin(n*ΔT)      0  0           cos(n*ΔT)         2*sin(n*ΔT)              0;
+         -6*n*(1-cos(n*ΔT))  0  0          -2*sin(n*ΔT)       4*cos(n*ΔT)-3            0;
+          0                  0 -sin(n*ΔT)   0                 0                        cos(n*ΔT)];
+    B = 1/m*[ 1/n^2(1-cos(n*ΔT))     2/n^2*(n*ΔT-sin(n*ΔT))       0;
+             -2/n^2*(n*ΔT-sin(n*ΔT)) 4/n^2*(1-cos(n*ΔT))-3/2*ΔT^2 0;
+              0                      0                            1/n^2(1-cos(n*ΔT));
+              1/n*sin(n*ΔT)          2/n*(1-cos(n*ΔT))            0;
+             -2/n*(1-cos(n*ΔT))      4/n*sin(n*ΔT)-3*ΔT           0;
+              0                      0                            1/n*sin(n*ΔT)]
+    # A = [ 4-3*cos(n*ΔT)          0  0   1/n*sin(n*ΔT)     2/n*(1-cos(n*ΔT))        0;
+    #           6*(sin(n*ΔT)-n*ΔT) 1  0  -2/n*(1-cos(n*ΔT)) 1/n*(4*sin(n*ΔT)-3*n*ΔT) 0;  
+    #           0                  0  0   0                 0                        0;
+    #           3*n*sin(n*ΔT)      0  0           cos(n*ΔT)         2*sin(n*ΔT)      0;
+    #          -6*n*(1-cos(n*ΔT))  0  0          -2*sin(n*ΔT)       4*cos(n*ΔT)-3    0;
+    #           0                  0  0   0                 0                        0];
+    # B = 1/m*[     1/n^2(1-cos(n*ΔT))         2/n^2*(n*ΔT-sin(n*ΔT))       0;
+    #              -2/n^2*(n*ΔT-sin(n*ΔT)) 4/n^2*(1-cos(n*ΔT))-3/2*ΔT^2 0;
+    #               0                      0                            0;
+    #               1/n*sin(n*ΔT)          2/n*(1-cos(n*ΔT))            0;
+    #              -2/n*(1-cos(n*ΔT))      4/n*sin(n*ΔT)-3*ΔT           0;
+    #               0                      0                            0]
     return Satellite3D(ΔT, n, m, A, B, u_max)
 end  
 
