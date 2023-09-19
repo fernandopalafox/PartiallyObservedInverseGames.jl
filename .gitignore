@@ -1,5 +1,5 @@
 /test/Manifest.toml
 /figures
 poetry.lock
-*.gif
+/old_figures
 *.csv
