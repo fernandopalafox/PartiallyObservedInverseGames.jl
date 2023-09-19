@@ -1,4 +1,4 @@
-# SlackHyperplanes.jl
+# InverseHyperplanes.jl
 
 Collision-free trajectories for non-cooperative multi-agent systems using inferred rotating hyperplane inequality constraints. 
 
