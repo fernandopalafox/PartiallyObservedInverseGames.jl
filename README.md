@@ -11,9 +11,9 @@ The inferred hyperplanes can then be used for collision-free trajectories in pre
     <td style="height: 10px;">3. Collision-free trajectory</td>
   </tr>
   <tr>
-    <td valign="top"><img src="media/pull_expert.gif"  height="275"></td>
-    <td valign="top"><img src="media/pull_inverse.gif" height="275"></td>
-    <td valign="top"><img src="media/pull_3D.gif"      height="275"></td>
+    <td valign="top"><img src="media/pull_expert.gif"  height="250"></td>
+    <td valign="top"><img src="media/pull_inverse.gif" height="250"></td>
+    <td valign="top"><img src="media/pull_3D.gif"      height="250"></td>
   </tr>
  </table>
 
