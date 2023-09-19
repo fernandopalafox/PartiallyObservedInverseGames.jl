@@ -31,7 +31,7 @@ There are two steps to our approach:
 
 Rotating hyperplanes are essentially half-plane constraints that rotate over time. They are defined by a normal vector $\mathbf{n}$, a rotation rate $\omega$, and a KoZ radius $\rho$. The normal vector is centered at an "obstacle" player $j$ and is rotated by $\omega$ at each time step, and the hyperplane is defined by the normal vector and the KoZ radius. An ego robot $i$ avoids collisions with $j$ by staying on the same side of the hyperplane as $j$.
 
-<img src="media/koz_diagram.jpg" alt="Rotating hyperplane" width="300"/>
+<img src="media/koz_diagram.jpg" width="250"/>
 
 
 ### 1. Inverse Game Solver
