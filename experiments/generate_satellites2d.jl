@@ -19,6 +19,8 @@ using Plots
 
 include("utils/misc.jl")
 
+# GENERATE 2D SATELLITE TRAJECTORIES
+
 # ---- Setup ---- 
 
 let 
