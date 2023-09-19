@@ -33,7 +33,6 @@ Rotating hyperplanes are essentially half-plane constraints that rotate over tim
 
 <img src="media/koz_diagram.jpg" width="250"/>
 
-
 ### 1. Inverse Game Solver
 Using collision-free expert data, we infer hyperplane parameters $\theta$ by minimizing the difference between the observed trajectories, and the equilibrium trajectory from a game parameterized by $\theta$.
 
