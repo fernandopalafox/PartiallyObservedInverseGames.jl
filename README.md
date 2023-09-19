@@ -4,25 +4,18 @@ An inverse game solver for inferring rotating hyperplanes from noise-corrupted o
 
 The inferred hyperplanes can then be used for collision-free trajectories in previously unseen scenarios. 
 
-<div style="display: flex;" width = "300">
-  <img src="media/pull_expert.gif" alt="Image 1" style="flex: 30%; padding: 5px;" width="200">
-  <img src="media/pull_inverse.gif" alt="Image 2" style="flex: 30%; padding: 5px;" width="100">
-</div> 
-<!-- <img src="media/pull_inverse.gif" width="300"> -->
-<div style="overflow: hidden; width: 300px; height: 300px; align-items: center;">
-  <img src="media/pull_3D.gif" alt="Cropped Image" style="object-fit: cover; width: 100%; height: 100%;">
-</div>
-
-<p align="center">
-  <img alt="Light" src="media/pull_expert.gif" width="45%">
-&nbsp; &nbsp; &nbsp; &nbsp;
-  <img alt="Dark" src="media/pull_inverse.gif" width="45%">
-</p>
-<p align="center">
-  <div style="overflow: hidden; width: 200px; height: 200px;">
-    <img alt="Light" src="media/pull_3D.gif" style="object-fit: cover; width: 100%; height: 100%;">
-  </div>
-</p>
+<table>
+  <tr>
+    <td style="height: 10px;">1. Noisy expert data</td>
+    <td style="height: 10px;">2. Inferred hyperplanes</td>
+    <td style="height: 10px;">3. Collision-free trajectory</td>
+  </tr>
+  <tr>
+    <td valign="top"><img src="media/pull_expert.gif"  height="350"></td>
+    <td valign="top"><img src="media/pull_inverse.gif" height="350"></td>
+    <td valign="top"><img src="media/pull_3D.gif"      height="350"></td>
+  </tr>
+ </table>
 
 Built from a fork of [PartiallyObservedInverseGames](https://github.com/PRBonn/PartiallyObservedInverseGames.jl)
 
